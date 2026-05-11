@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import time
 from dataclasses import dataclass
 from importlib import metadata
@@ -32,6 +33,7 @@ DEPENDENCY_PACKAGES = [
     "pandas",
     "numpy",
     "matplotlib",
+    "pylatexenc",
 ]
 
 
@@ -126,6 +128,35 @@ class FinancialDataset:
     train_prev_close: np.ndarray
     test_prev_close: np.ndarray
     raw_frame: pd.DataFrame
+
+
+def limit_dataset_samples(
+    dataset: FinancialDataset,
+    max_train_samples: int | None = None,
+    max_test_samples: int | None = None,
+) -> FinancialDataset:
+    """Return a shallow dataset copy limited for fast simulator smoke tests."""
+
+    train_slice = slice(None if not max_train_samples else -max_train_samples, None)
+    test_slice = slice(0, None if not max_test_samples else max_test_samples)
+    return FinancialDataset(
+        symbol=dataset.symbol,
+        selected_features=dataset.selected_features,
+        feature_selection_method=dataset.feature_selection_method,
+        feature_scaler=dataset.feature_scaler,
+        target_scaler=dataset.target_scaler,
+        train_qnn_x=dataset.train_qnn_x[train_slice],
+        test_qnn_x=dataset.test_qnn_x[test_slice],
+        train_seq_x=dataset.train_seq_x[train_slice],
+        test_seq_x=dataset.test_seq_x[test_slice],
+        train_y_scaled=dataset.train_y_scaled[train_slice],
+        test_y_scaled=dataset.test_y_scaled[test_slice],
+        train_y_price=dataset.train_y_price[train_slice],
+        test_y_price=dataset.test_y_price[test_slice],
+        train_prev_close=dataset.train_prev_close[train_slice],
+        test_prev_close=dataset.test_prev_close[test_slice],
+        raw_frame=dataset.raw_frame,
+    )
 
 
 def dependency_versions() -> dict[str, str]:
@@ -583,11 +614,18 @@ def download_ohlcv(
     start: str = "2018-01-01",
     end: str | None = None,
     auto_adjust: bool = True,
+    cache_dir: Path | None = None,
 ) -> pd.DataFrame:
     """Download public OHLCV market data with yfinance."""
 
     import yfinance as yf
 
+    if cache_dir is None:
+        cache_root = Path(os.environ.get("LOCALAPPDATA", Path.home()))
+        cache_dir = cache_root / "quantum_stock_price_prediction" / "yfinance_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    yf.cache.set_cache_location(str(cache_dir.resolve()))
+    yf.set_tz_cache_location(str(cache_dir.resolve()))
     frame = yf.download(symbol, start=start, end=end, auto_adjust=auto_adjust, progress=False)
     if frame.empty:
         raise ValueError(f"No data downloaded for {symbol}.")
@@ -683,6 +721,10 @@ def create_supervised_sequences(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Create time-window sequences plus single-step QNN inputs."""
 
+    y_scaled_flat = np.asarray(y_scaled, dtype=float).ravel()
+    y_price_flat = np.asarray(y_price, dtype=float).ravel()
+    prev_close_flat = np.asarray(prev_close, dtype=float).ravel()
+
     seq_x: list[np.ndarray] = []
     qnn_x: list[np.ndarray] = []
     seq_y_scaled: list[float] = []
@@ -693,9 +735,9 @@ def create_supervised_sequences(
         start_idx = end_idx - window_size + 1
         seq_x.append(selected_features[start_idx : end_idx + 1])
         qnn_x.append(selected_features[end_idx])
-        seq_y_scaled.append(float(y_scaled[end_idx]))
-        seq_y_price.append(float(y_price[end_idx]))
-        seq_prev_close.append(float(prev_close[end_idx]))
+        seq_y_scaled.append(float(y_scaled_flat[end_idx]))
+        seq_y_price.append(float(y_price_flat[end_idx]))
+        seq_prev_close.append(float(prev_close_flat[end_idx]))
 
     return (
         np.asarray(seq_x, dtype=np.float32),
@@ -1193,11 +1235,25 @@ def run_aapl_smoke_pipeline(
     epochs_lstm: int = 3,
     epochs_qnn: int = 1,
     epochs_hybrid: int = 1,
+    max_train_samples: int | None = 32,
+    max_test_samples: int | None = 16,
 ) -> pd.DataFrame:
     """Small end-to-end AAPL run. Keep epochs low for simulator feasibility."""
 
     verify_architecture_unchanged(output_dir=output_dir, draw=True)
-    dataset = prepare_financial_dataset(symbol="AAPL", num_qubits=DEFAULT_NUM_QUBITS)
+    full_dataset = prepare_financial_dataset(symbol="AAPL", num_qubits=DEFAULT_NUM_QUBITS)
+    dataset = limit_dataset_samples(
+        full_dataset,
+        max_train_samples=max_train_samples,
+        max_test_samples=max_test_samples,
+    )
+    subset_label = "Full dataset" if not max_train_samples and not max_test_samples else "Smoke subset"
+    note_prefix = "Full dataset." if subset_label == "Full dataset" else "Smoke subset."
+    print(
+        f"{subset_label}: "
+        f"train={len(dataset.train_y_scaled)} / {len(full_dataset.train_y_scaled)}, "
+        f"test={len(dataset.test_y_scaled)} / {len(full_dataset.test_y_scaled)}"
+    )
     original_depth = build_original_custom_qnn_circuit().depth()
 
     naive = evaluate_naive_previous_close(dataset)
@@ -1238,14 +1294,14 @@ def run_aapl_smoke_pipeline(
             "Naive previous-close baseline",
             dataset,
             naive,
-            notes="Predicts next close as previous close.",
+            notes=f"{note_prefix} Predicts next close as previous close.",
             circuit_depth="N/A",
         ),
         make_result_row(
             "Classical LSTM",
             dataset,
             lstm_history,
-            notes="Simple PyTorch LSTM baseline.",
+            notes=f"{note_prefix} Simple PyTorch LSTM baseline.",
             circuit_depth="N/A",
         ),
         {
@@ -1264,14 +1320,14 @@ def run_aapl_smoke_pipeline(
             "Standalone CustomQNN",
             dataset,
             qnn_history,
-            notes="Preserved circuit used directly as QNN regressor.",
+            notes=f"{note_prefix} Preserved circuit used directly as QNN regressor.",
             circuit_depth=original_depth,
         ),
         make_result_row(
             "HybridQNN1",
             dataset,
             hybrid_history,
-            notes="LSTM feature extractor with preserved QNN final regression layer.",
+            notes=f"{note_prefix} LSTM feature extractor with preserved QNN final regression layer.",
             circuit_depth=original_depth,
         ),
     ]
@@ -1299,6 +1355,11 @@ def main() -> None:
     parser.add_argument("--verify", action="store_true", help="Verify/draw original vs refactored circuits.")
     parser.add_argument("--dummy", action="store_true", help="Run a one-step dummy QNN training sanity test.")
     parser.add_argument("--aapl-smoke", action="store_true", help="Run a small AAPL smoke pipeline.")
+    parser.add_argument("--epochs-lstm", type=int, default=3, help="Epochs for the AAPL smoke LSTM.")
+    parser.add_argument("--epochs-qnn", type=int, default=1, help="Epochs for the AAPL smoke standalone QNN.")
+    parser.add_argument("--epochs-hybrid", type=int, default=1, help="Epochs for the AAPL smoke HybridQNN1.")
+    parser.add_argument("--max-train-samples", type=int, default=32, help="Max training samples for smoke runs.")
+    parser.add_argument("--max-test-samples", type=int, default=16, help="Max test samples for smoke runs.")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     args = parser.parse_args()
 
@@ -1307,7 +1368,14 @@ def main() -> None:
     if args.dummy:
         run_dummy_sanity_test()
     if args.aapl_smoke:
-        run_aapl_smoke_pipeline(output_dir=args.output_dir)
+        run_aapl_smoke_pipeline(
+            output_dir=args.output_dir,
+            epochs_lstm=args.epochs_lstm,
+            epochs_qnn=args.epochs_qnn,
+            epochs_hybrid=args.epochs_hybrid,
+            max_train_samples=args.max_train_samples,
+            max_test_samples=args.max_test_samples,
+        )
     if not (args.verify or args.dummy or args.aapl_smoke):
         parser.print_help()
 

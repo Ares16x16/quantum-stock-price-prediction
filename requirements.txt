@@ -1,0 +1,8 @@
+qiskit
+qiskit-machine-learning
+yfinance
+scikit-learn
+matplotlib
+pandas
+torch
+pylatexenc
