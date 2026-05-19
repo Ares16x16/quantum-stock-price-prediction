@@ -20,6 +20,7 @@ if str(SRC) not in sys.path:
 
 from custom_qnn_financial_pipeline import run_dummy_sanity_test, verify_architecture_unchanged
 from qsp.experiments.run_contextual_qnn import run_single_asset, run_two_asset_qmtl
+from qsp.experiments.run_contextual_qnn_multilevel import run_multilevel_single_asset
 from qsp.experiments.run_quantum_inspired import run_quantum_inspired_experiment
 
 
@@ -60,6 +61,21 @@ def run_lightweight_suite() -> None:
     )
     print(qmtl.to_string(index=False))
 
+    print("Running ContextualQNN d=4 AAPL experiment...")
+    contextual_d4 = run_multilevel_single_asset(
+        symbol="AAPL",
+        start="2018-01-01",
+        output_dir=ROOT / "output" / "contextual_qnn_multilevel",
+        context_length=2,
+        num_levels=4,
+        epochs=240,
+        max_samples=256,
+        num_layers=4,
+        learning_rate=0.05,
+        spsa_perturbation=0.01,
+    )
+    print(contextual_d4.to_string(index=False))
+
     print("Running ANN / QQBN / QQTN AAPL experiment...")
     qi = run_quantum_inspired_experiment(
         symbol="AAPL",
@@ -77,7 +93,7 @@ def main() -> None:
     parser.add_argument(
         "--all-light",
         action="store_true",
-        help="Run circuit verification, dummy sanity test, ContextualQNN, QMTL, and ANN/QQBN/QQTN.",
+        help="Run circuit verification, dummy sanity test, binary ContextualQNN, QMTL, d=4 ContextualQNN, and ANN/QQBN/QQTN.",
     )
     args = parser.parse_args()
 

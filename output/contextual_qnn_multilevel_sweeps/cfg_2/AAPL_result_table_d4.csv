@@ -1,0 +1,2 @@
+Model name,Dataset / asset,Number of qubits,VQC layers,Feature set,RMSE,MAE,Directional Accuracy,Training time,Inference time,Parameter count,Circuit depth,Notes
+ContextualQNN-d4,AAPL,6,3,"Density-based return buckets, d=4, T=2, tau=1",N/A,N/A,0.25,11.554283800000121,0.12881689999994705,36,12,"120 epochs, 160 context-target samples, d=4, T=2, num_layers=3, learning_rate=0.1, spsa_perturbation=0.01. Data source: yfinance."

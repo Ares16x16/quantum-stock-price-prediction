@@ -6,15 +6,22 @@ Run:
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
-from qsp.web_demo import SUPPORTED_TICKERS, run_quick_prediction
-
-
 ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+from qsp.web_demo import (
+    SUPPORTED_TICKERS,
+    run_multilevel_quick_prediction,
+    run_quick_prediction,
+)
 FULL_OUTPUT = ROOT / "output" / "qnn_full_aapl"
 DIAGNOSTIC_OUTPUT = ROOT / "output" / "qnn_diagnostic_aapl"
 DOCS = ROOT / "docs"
@@ -35,6 +42,7 @@ tabs = st.tabs(
         "All Results",
         "Circuit Viewer",
         "Interactive Prediction",
+        "Advanced ContextualQNN",
         "Saved AAPL Results",
         "Paper Tracker",
         "Docs & Links",
@@ -99,6 +107,7 @@ with tabs[1]:
         "HQNN-FSP CustomQNN": FULL_OUTPUT / "result_table.csv",
         "ContextualQNN AAPL": ROOT / "output" / "contextual_qnn" / "AAPL_result_table.csv",
         "ContextualQNN two-asset QMTL": ROOT / "output" / "contextual_qnn" / "qmtl_two_asset_result_table.csv",
+        "ContextualQNN d=4 AAPL": ROOT / "output" / "contextual_qnn_multilevel" / "AAPL_result_table_d4.csv",
         "ANN / QQBN / QQTN": ROOT / "output" / "quantum_inspired" / "AAPL_result_table.csv",
     }
     loaded_tables = []
@@ -185,6 +194,79 @@ with tabs[3]:
         st.info("Choose a ticker, set the sample size, then press Run prediction.")
 
 with tabs[4]:
+    st.header("Advanced ContextualQNN")
+    st.write(
+        "This tab runs the higher-resolution ContextualQNN path with density-based return buckets. "
+        "It is the next paper-aligned step after the binary d=2 version."
+    )
+    col_a, col_b, col_c = st.columns([1.3, 1.0, 1.0])
+    with col_a:
+        selected_symbol_d4 = st.selectbox(
+            "Asset for d=4 model",
+            list(SUPPORTED_TICKERS.keys()),
+            format_func=lambda symbol: f"{symbol} - {SUPPORTED_TICKERS[symbol]}",
+            key="d4_asset",
+        )
+    with col_b:
+        epochs_d4 = st.slider("d=4 epochs", 10, 240, 80, step=10)
+    with col_c:
+        max_samples_d4 = st.slider("d=4 recent samples", 64, 320, 160, step=32)
+    run_multilevel_clicked = st.button("Run d=4 prediction", type="primary")
+
+    @st.cache_data(show_spinner=False, ttl=3600)
+    def _cached_multilevel_prediction(symbol: str, epochs_value: int, sample_count: int):
+        return run_multilevel_quick_prediction(
+            symbol=symbol,
+            epochs=epochs_value,
+            max_samples=sample_count,
+        )
+
+    saved_d4 = _read_csv(ROOT / "output" / "contextual_qnn_multilevel" / "AAPL_result_table_d4.csv")
+    if saved_d4 is not None:
+        st.caption("Latest saved d=4 artifact")
+        st.dataframe(_dashboard_table(saved_d4), use_container_width=True)
+
+    if run_multilevel_clicked:
+        with st.spinner("Preparing prices and running d=4 ContextualQNN..."):
+            prediction_d4, recent_prices_d4, probability_frame = _cached_multilevel_prediction(
+                selected_symbol_d4, epochs_d4, max_samples_d4
+            )
+
+        if prediction_d4.data_source != "yfinance":
+            st.warning(
+                "This run used deterministic sample data because yfinance was not available. "
+                "Treat it as an interface check only."
+            )
+        else:
+            st.success("Data source: yfinance live download.")
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Last close", f"{prediction_d4.last_close:.2f}", help=f"Date: {prediction_d4.last_date}")
+        m2.metric("Previous close", f"{prediction_d4.previous_close:.2f}")
+        m3.metric("Predicted bucket", str(prediction_d4.predicted_bucket))
+        m4.metric("Holdout accuracy", f"{prediction_d4.holdout_accuracy:.3f}")
+
+        st.subheader(f"{prediction_d4.symbol} d=4 regime prediction")
+        st.write(
+            f"Latest context `{prediction_d4.latest_context}` -> predicted next-return bucket "
+            f"`{prediction_d4.predicted_bucket}` ({prediction_d4.predicted_bucket_label})."
+        )
+        st.caption(
+            f"Training method: density-based return quantization with d=4, context length T=2, "
+            f"80/20 time split, lightweight statevector ContextualQNN, SPSA-style optimization, "
+            f"data source `{prediction_d4.data_source}`."
+        )
+        prob_chart = probability_frame.set_index("label")[["probability"]]
+        st.bar_chart(prob_chart)
+        st.line_chart(recent_prices_d4.set_index("Date")["Close"])
+        st.caption(
+            "This panel predicts the return regime rather than the exact next close. "
+            "It is the higher-resolution contextual path that can still run locally on CPU."
+        )
+    else:
+        st.info("Choose a ticker for the d=4 model, then press Run d=4 prediction.")
+
+with tabs[5]:
     st.header("Saved AAPL Results")
     model = st.selectbox(
         "Saved prediction plot",
@@ -206,7 +288,7 @@ with tabs[4]:
     else:
         st.caption("The LSTM plot is taken from the full AAPL benchmark run.")
 
-with tabs[5]:
+with tabs[6]:
     st.header("Paper Reproduction Tracker")
     queue = DOCS / "paper_queue.md"
     progress = DOCS / "progress_log.md"
@@ -219,12 +301,12 @@ with tabs[5]:
     st.markdown(
         """
         - `HQNN-FSP: A Hybrid Classical-Quantum Neural Network for Regression-Based Financial Stock Market Prediction`: preserved Qiskit circuit plus trainable `EstimatorQNN` pipeline.
-        - `Contextual Quantum Neural Networks for Stock Price Prediction`: binary context model and two-asset QMTL run.
+        - `Contextual Quantum Neural Networks for Stock Price Prediction`: binary context model, d=4 multilevel extension, and two-asset QMTL run.
         - `Quantum Inspired Qubit Qutrit Neural Networks for Real Time Financial Forecasting`: ANN, QQBN, and QQTN direction-classification run.
         """
     )
 
-with tabs[6]:
+with tabs[7]:
     st.header("Docs & Links")
     docs = {
         "Progress log": DOCS / "progress_log.md",

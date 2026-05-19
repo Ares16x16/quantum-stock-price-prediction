@@ -47,6 +47,7 @@ It also includes:
 |   `-- progress_log.md
 |-- output/
 |   |-- contextual_qnn/
+|   |-- contextual_qnn_multilevel/
 |   |-- qnn_diagnostic_aapl/
 |   |-- qnn_full_aapl/
 |   `-- quantum_inspired/
@@ -127,6 +128,7 @@ The Streamlit dashboard includes:
 - **All Results**: consolidated saved outputs from the three paper tracks;
 - **Circuit Viewer**: original and trainable Qiskit circuit diagrams;
 - **Interactive Prediction**: ticker selector plus lightweight ContextualQNN direction prediction;
+- **Advanced ContextualQNN**: higher-resolution `d=4` return-bucket prediction on a separate tab;
 - **Saved AAPL Results**: plots for LSTM, CustomQNN, and HybridQNN1;
 - **Paper Tracker**: plain-language project progress and paper coverage notes;
 - **Docs & Links**: direct paths to the repository notes.
@@ -144,6 +146,15 @@ The dashboard will:
 - derive binary return labels from recent closes;
 - fit a lightweight statevector ContextualQNN;
 - show the latest close, naive next close, probability of an up move, and holdout accuracy.
+
+### How to use the advanced ContextualQNN page
+
+1. Open the **Advanced ContextualQNN** tab.
+2. Select a supported ticker.
+3. Adjust `d=4 epochs` and `d=4 recent samples` if needed.
+4. Press **Run d=4 prediction**.
+
+This page uses density-based return buckets with `d=4`, context length `T=2`, and a lightweight statevector model. It predicts the next return regime rather than the exact next close, and it shows the full bucket probability distribution.
 
 If `yfinance` is unavailable, the dashboard falls back to deterministic sample data and labels that result clearly.
 
@@ -197,6 +208,13 @@ $env:PYTHONPATH='src;.'
 .\.venv\Scripts\python.exe -m qsp.experiments.run_contextual_qnn --qmtl --qmtl-symbols AAPL MSFT --epochs 400 --max-samples 160 --num-layers 3 --learning-rate 0.1 --spsa-perturbation 0.01
 ```
 
+Higher-resolution `d=4` AAPL run:
+
+```powershell
+$env:PYTHONPATH='src;.'
+.\.venv\Scripts\python.exe -m qsp.experiments.run_contextual_qnn_multilevel --symbol AAPL --epochs 240 --max-samples 256 --num-layers 4 --learning-rate 0.05 --spsa-perturbation 0.01
+```
+
 Training method:
 
 - binary return quantization with `d=2`;
@@ -206,10 +224,17 @@ Training method:
 - SPSA-style update;
 - time-ordered train/test split.
 
+Higher-resolution extension:
+
+- density-based return quantization with `d=4`;
+- two qubits per symbol, so `T=2, tau=1` maps to 6 qubits;
+- exact-match multiclass holdout accuracy on the saved AAPL artifact.
+
 Current live-data result:
 
 - `ContextualQNN` AAPL: `0.6923` directional accuracy
 - `ContextualQNN-QMTL` AAPL+MSFT: `0.5469` directional accuracy
+- `ContextualQNN-d4` AAPL: `0.4231` multiclass accuracy
 
 ### 3. ANN / QQBN / QQTN
 
@@ -245,6 +270,8 @@ Model interpretation:
   smaller diagnostic rerun for CustomQNN and HybridQNN1 plotting
 - `output/contextual_qnn/`
   ContextualQNN and QMTL result tables, losses, predictions
+- `output/contextual_qnn_multilevel/`
+  higher-resolution `d=4` ContextualQNN artifacts
 - `output/quantum_inspired/`
   ANN / QQBN / QQTN result tables and loss curves
 

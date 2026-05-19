@@ -5,7 +5,7 @@ The project currently tracks three papers. Each paper has a separate implementat
 | Paper | Implementation in this repository |
 |---|---|
 | *HQNN-FSP: A Hybrid Classical-Quantum Neural Network for Regression-Based Financial Stock Market Prediction* | Reproduced Qiskit circuit, trainable `EstimatorQNN`, AAPL regression pipeline |
-| *Contextual Quantum Neural Networks for Stock Price Prediction* | Binary context model, fidelity-style loss, SPSA-style update, two-asset QMTL run |
+| *Contextual Quantum Neural Networks for Stock Price Prediction* | Binary context model, higher-resolution `d=4` context model, fidelity-style loss, SPSA-style update, two-asset QMTL run |
 | *Quantum Inspired Qubit Qutrit Neural Networks for Real Time Financial Forecasting* | ANN, QQBN, and QQTN direction-classification run |
 
 ## HQNN-FSP
@@ -27,13 +27,14 @@ Not included yet:
 
 ## Contextual Quantum Neural Networks
 
-The Contextual QNN implementation follows the paper's use of recent return contexts to predict a future return distribution. The current version uses `d=2`, `T=2`, and `tau=1`, which keeps the simulation small enough for local execution. The QMTL version uses shared parameters plus asset-specific parameters for the AAPL/MSFT two-asset case.
+The Contextual QNN implementation follows the paper's use of recent return contexts to predict a future return distribution. The local binary version uses `d=2`, `T=2`, and `tau=1`, which keeps the simulation small enough for local execution. A second local variant now uses density-based `d=4` buckets with the same `T=2, tau=1` structure, so the next-step symbol is harder and the qubit count rises from 3 to 6. The QMTL version uses shared parameters plus asset-specific parameters for the AAPL/MSFT two-asset case.
 
 The current implementation is a compact reproduction of the paper's modelling idea rather than a full hardware-scale circuit study. It is suitable for the interim stage because it produces real artifacts: context distributions, loss logs, prediction outputs, and result tables.
 
 Included from the paper:
 
 - binary return context modelling;
+- higher-resolution return-bucket modelling with `d=4` in a local simulator setting;
 - conditional next-step distribution prediction;
 - fidelity-style distribution objective;
 - SPSA-style optimization for a lightweight simulator path;

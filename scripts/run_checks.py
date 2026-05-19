@@ -10,6 +10,8 @@ import ast
 import sys
 from pathlib import Path
 
+import numpy as np
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
@@ -28,9 +30,18 @@ def check_ast() -> None:
 
 
 def check_contextual_qnn() -> None:
-    from qsp.data import context_target_distribution, make_binary_context_dataset
+    from qsp.data import (
+        context_target_distribution,
+        make_binary_context_dataset,
+        make_discrete_context_dataset,
+        multilevel_context_target_distribution,
+    )
     from qsp.evaluation import binary_direction_metrics
     from qsp.models.contextual_qnn import ContextualQNN, ContextualQNNConfig, make_qmtl_asset_ids
+    from qsp.models.contextual_qnn_multilevel import (
+        MultiLevelContextualQNN,
+        MultiLevelContextualQNNConfig,
+    )
 
     close = [10, 11, 10, 12, 13, 12]
     data = make_binary_context_dataset(close, context_length=2, horizon=1)
@@ -47,14 +58,32 @@ def check_contextual_qnn() -> None:
 
     metrics = binary_direction_metrics(data.targets, model.predict(data.contexts, asset_ids))
     assert 0.0 <= metrics["accuracy"] <= 1.0
+
+    multilevel = make_discrete_context_dataset(close, context_length=2, horizon=1, num_levels=4)
+    assert multilevel.contexts.shape == (3, 2)
+    assert multilevel.targets.shape == (3,)
+    dist4 = multilevel_context_target_distribution(multilevel.contexts, multilevel.targets, num_levels=4)
+    prob_cols = [f"p_{level}" for level in range(4)]
+    assert ((dist4[prob_cols].sum(axis=1) - 1.0).abs() < 1e-12).all()
+
+    multilevel_model = MultiLevelContextualQNN(MultiLevelContextualQNNConfig(context_length=2, num_levels=4))
+    loss4 = multilevel_model.spsa_step(multilevel.contexts, multilevel.targets)
+    assert loss4 == loss4
+    pred4 = multilevel_model.predict_proba(multilevel.contexts)
+    assert pred4.shape == (3, 4)
+    assert np.allclose(pred4.sum(axis=1), 1.0)
     print("Contextual QNN checks OK")
 
 
 def check_web_demo_helpers() -> None:
-    from qsp.web_demo import SUPPORTED_TICKERS
+    from qsp.web_demo import SUPPORTED_TICKERS, run_multilevel_quick_prediction
 
     assert "AAPL" in SUPPORTED_TICKERS
     assert "BTC-USD" in SUPPORTED_TICKERS
+    prediction, recent, probabilities = run_multilevel_quick_prediction("AAPL", epochs=1, max_samples=64)
+    assert prediction.symbol == "AAPL"
+    assert not recent.empty
+    assert abs(float(probabilities["probability"].sum()) - 1.0) < 1e-9
     print("Web demo helper checks OK")
 
 

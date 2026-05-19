@@ -29,18 +29,21 @@ These figures are an execution baseline rather than a final performance claim. O
 
 The second implementation track follows *Contextual Quantum Neural Networks for Stock Price Prediction*. The current code uses binary return quantization with `d=2`, context length `T=2`, and forecast horizon `tau=1`. It includes contextual sequence generation, a fidelity-style objective, SPSA-style updates, and a two-asset QMTL structure with shared and asset-specific parameters.
 
-Current output files are stored in `output/contextual_qnn`.
+Current output files are stored in `output/contextual_qnn` and `output/contextual_qnn_multilevel`.
 
 | Model | Asset | Samples | Directional Accuracy | Training Time |
 |---|---|---:|---:|---:|
 | ContextualQNN | AAPL | 128 | 0.6923 | 0.9493s |
 | ContextualQNN-QMTL | AAPL+MSFT | 320 | 0.5469 | 5.6619s |
+| ContextualQNN-d4 | AAPL | 256 | 0.4231 | 31.8448s |
 
-Both rows now use live yfinance data.
+All three contextual rows now use live yfinance data.
 
-The short training time is expected for this implementation. It is not running a full Qiskit estimator or a shot-based backend. Instead, it uses a very small 3-qubit statevector model implemented in NumPy, a recent-window dataset, and an SPSA-style update. That makes it useful for fast paper-aligned experiments and the interactive demo, but it should not be compared directly to the much heavier Qiskit CustomQNN training time.
+The short training time in the binary configuration is expected for this implementation. It is not running a full Qiskit estimator or a shot-based backend. Instead, it uses a very small statevector model implemented in NumPy, a recent-window dataset, and an SPSA-style update. That makes it useful for fast paper-aligned experiments and the interactive demo, but it should not be compared directly to the much heavier Qiskit CustomQNN training time.
 
 The current AAPL result has also been trained more aggressively than the earlier baseline. Increasing the layers and epochs drives the fidelity loss close to zero, but the holdout directional accuracy remains `0.6923`. This suggests that the present bottleneck is no longer simple undertraining; it is the expressive limit of the current small binary-context setup. The two-asset QMTL path, however, did improve after longer training and a slightly larger sample window.
+
+The next local step has now been implemented as a higher-resolution `d=4` variant. This version keeps `T=2` and `tau=1`, but replaces binary labels with four density-based return buckets. In the current AAPL run it uses 6 qubits, 4 layers, 240 SPSA-style updates, and reaches `0.4231` exact-match multiclass accuracy on live yfinance data. The score is lower than the binary model because the task is harder: the model must choose among four return regimes rather than only up versus down.
 
 ## Qubit/Qutrit Track
 
@@ -56,4 +59,4 @@ These models use normalized technical indicators, an 80/20 time-ordered split, A
 
 ## Demo Status
 
-The Streamlit dashboard loads saved artifacts, renders circuit diagrams, compares model result tables, and runs a lightweight ContextualQNN direction demo after a ticker is selected. It does not train the expensive CustomQNN inside the web interface.
+The Streamlit dashboard loads saved artifacts, renders circuit diagrams, compares model result tables, and runs two lightweight live demos after a ticker is selected: the binary ContextualQNN direction model and the higher-resolution `d=4` ContextualQNN regime model. It does not train the expensive CustomQNN inside the web interface.

@@ -12,11 +12,12 @@ $env:PYTHONPATH='src;.'
 .\.venv\Scripts\python.exe custom_qnn_financial_pipeline.py --verify
 .\.venv\Scripts\python.exe custom_qnn_financial_pipeline.py --dummy
 .\.venv\Scripts\python.exe -m qsp.experiments.run_contextual_qnn --symbol AAPL --epochs 100 --max-samples 128
+.\.venv\Scripts\python.exe -m qsp.experiments.run_contextual_qnn_multilevel --symbol AAPL --epochs 240 --max-samples 256 --num-layers 4 --learning-rate 0.05
 .\.venv\Scripts\python.exe -m qsp.experiments.run_quantum_inspired --symbol AAPL --epochs 60 --hidden-dim 48
 .\.venv\Scripts\python.exe -m streamlit run app\streamlit_app.py
 ```
 
-These runs finish quickly because they use either a tiny Qiskit check, a NumPy-based ContextualQNN simulator, or ordinary PyTorch models.
+These runs finish quickly because they use either a tiny Qiskit check, a NumPy-based ContextualQNN simulator, or ordinary PyTorch models. The new `d=4` ContextualQNN run is slower than the binary one, but it is still practical on a normal CPU laptop.
 
 lightweight path:
 
