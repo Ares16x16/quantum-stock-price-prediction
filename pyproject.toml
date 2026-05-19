@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quantum-stock-price-prediction"
+version = "0.1.0"
+description = "COMP7705 capstone experiments for quantum-enhanced financial prediction."
+requires-python = ">=3.11"
+
+[tool.setuptools]
+py-modules = ["custom_qnn_financial_pipeline", "reproduce_quantum_circuit"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

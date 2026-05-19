@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import math
 import os
+import tempfile
 import time
 from dataclasses import dataclass
 from importlib import metadata
@@ -621,12 +622,22 @@ def download_ohlcv(
     import yfinance as yf
 
     if cache_dir is None:
-        cache_root = Path(os.environ.get("LOCALAPPDATA", Path.home()))
-        cache_dir = cache_root / "quantum_stock_price_prediction" / "yfinance_cache"
+        # yfinance 1.3.x uses sqlite-backed caches. On this Windows setup,
+        # repo-local cache paths intermittently cause sqlite disk I/O errors.
+        # A temp directory with no workspace path spaces is more reliable.
+        cache_root = Path(tempfile.gettempdir()) / "quantum_stock_price_prediction"
+        cache_dir = cache_root / f"yfinance_cache_{os.getpid()}"
     cache_dir.mkdir(parents=True, exist_ok=True)
     yf.cache.set_cache_location(str(cache_dir.resolve()))
     yf.set_tz_cache_location(str(cache_dir.resolve()))
-    frame = yf.download(symbol, start=start, end=end, auto_adjust=auto_adjust, progress=False)
+    frame = yf.download(
+        symbol,
+        start=start,
+        end=end,
+        auto_adjust=auto_adjust,
+        progress=False,
+        threads=False,
+    )
     if frame.empty:
         raise ValueError(f"No data downloaded for {symbol}.")
     frame = _flatten_yfinance_columns(frame)

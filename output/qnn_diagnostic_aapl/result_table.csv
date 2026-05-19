@@ -1,0 +1,6 @@
+Model name,Dataset / asset,Number of qubits,VQC layers,Feature set,RMSE,MAE,Directional Accuracy,Training time,Inference time,Parameter count,Circuit depth,Notes
+Naive previous-close baseline,AAPL,5,1,"Open, High, Low, Close, SMA5",2.5947419992719207,2.020481586456299,0.015625,0.0,3.399998604436405e-06,0,N/A,Smoke subset. Predicts next close as previous close.
+Classical LSTM,AAPL,5,1,"Open, High, Low, Close, SMA5",8.945015688307231,7.973898887634277,0.5,1.0843165000005683,0.09025300000030256,5025,N/A,Smoke subset. Simple PyTorch LSTM baseline.
+QLSTM teammate reproduced result,AAPL,5,1,"Open, High, Low, Close, SMA5",TBD,TBD,TBD,,,,TBD,Fill from teammate Colab result when available.
+Standalone CustomQNN,AAPL,5,1,"Open, High, Low, Close, SMA5",29.80499467403964,28.442359924316406,0.375,147.33988619999946,0.2068981000011263,44,33,Smoke subset. Preserved circuit used directly as QNN regressor.
+HybridQNN1,AAPL,5,1,"Open, High, Low, Close, SMA5",49.83797478297799,49.08720397949219,0.375,148.65275649999967,0.21488469999894733,5201,33,Smoke subset. LSTM feature extractor with preserved QNN final regression layer.
