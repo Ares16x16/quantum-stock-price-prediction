@@ -33,12 +33,14 @@ Current output files are stored in `output/contextual_qnn`.
 
 | Model | Asset | Samples | Directional Accuracy | Training Time |
 |---|---|---:|---:|---:|
-| ContextualQNN | AAPL | 128 | 0.6923 | 0.2987s |
-| ContextualQNN-QMTL | AAPL+MSFT | 256 | 0.4615 | 0.5997s |
+| ContextualQNN | AAPL | 128 | 0.6923 | 0.9493s |
+| ContextualQNN-QMTL | AAPL+MSFT | 320 | 0.5469 | 5.6619s |
 
 Both rows now use live yfinance data.
 
 The short training time is expected for this implementation. It is not running a full Qiskit estimator or a shot-based backend. Instead, it uses a very small 3-qubit statevector model implemented in NumPy, a recent-window dataset, and an SPSA-style update. That makes it useful for fast paper-aligned experiments and the interactive demo, but it should not be compared directly to the much heavier Qiskit CustomQNN training time.
+
+The current AAPL result has also been trained more aggressively than the earlier baseline. Increasing the layers and epochs drives the fidelity loss close to zero, but the holdout directional accuracy remains `0.6923`. This suggests that the present bottleneck is no longer simple undertraining; it is the expressive limit of the current small binary-context setup. The two-asset QMTL path, however, did improve after longer training and a slightly larger sample window.
 
 ## Qubit/Qutrit Track
 

@@ -1348,6 +1348,24 @@ def run_aapl_smoke_pipeline(
     return result_table
 
 
+def run_aapl_full_pipeline(
+    output_dir: Path = Path("output/qnn_full_aapl"),
+    epochs_lstm: int = 10,
+    epochs_qnn: int = 1,
+    epochs_hybrid: int = 1,
+) -> pd.DataFrame:
+    """Full AAPL pipeline with the preserved circuit and no sample truncation."""
+
+    return run_aapl_smoke_pipeline(
+        output_dir=output_dir,
+        epochs_lstm=epochs_lstm,
+        epochs_qnn=epochs_qnn,
+        epochs_hybrid=epochs_hybrid,
+        max_train_samples=None,
+        max_test_samples=None,
+    )
+
+
 def teammate_update_text() -> str:
     """Short explanation suitable for teammates."""
 
@@ -1366,6 +1384,7 @@ def main() -> None:
     parser.add_argument("--verify", action="store_true", help="Verify/draw original vs refactored circuits.")
     parser.add_argument("--dummy", action="store_true", help="Run a one-step dummy QNN training sanity test.")
     parser.add_argument("--aapl-smoke", action="store_true", help="Run a small AAPL smoke pipeline.")
+    parser.add_argument("--full", action="store_true", help="Run the full AAPL regression pipeline.")
     parser.add_argument("--epochs-lstm", type=int, default=3, help="Epochs for the AAPL smoke LSTM.")
     parser.add_argument("--epochs-qnn", type=int, default=1, help="Epochs for the AAPL smoke standalone QNN.")
     parser.add_argument("--epochs-hybrid", type=int, default=1, help="Epochs for the AAPL smoke HybridQNN1.")
@@ -1387,7 +1406,14 @@ def main() -> None:
             max_train_samples=args.max_train_samples,
             max_test_samples=args.max_test_samples,
         )
-    if not (args.verify or args.dummy or args.aapl_smoke):
+    if args.full:
+        run_aapl_full_pipeline(
+            output_dir=args.output_dir,
+            epochs_lstm=max(args.epochs_lstm, 10),
+            epochs_qnn=args.epochs_qnn,
+            epochs_hybrid=args.epochs_hybrid,
+        )
+    if not (args.verify or args.dummy or args.aapl_smoke or args.full):
         parser.print_help()
 
 

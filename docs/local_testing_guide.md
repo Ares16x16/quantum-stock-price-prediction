@@ -18,6 +18,13 @@ $env:PYTHONPATH='src;.'
 
 These runs finish quickly because they use either a tiny Qiskit check, a NumPy-based ContextualQNN simulator, or ordinary PyTorch models.
 
+lightweight path:
+
+```powershell
+$env:PYTHONPATH='src;.'
+.\.venv\Scripts\python.exe scripts\run_local_suite.py --all-light
+```
+
 ## Heavier Local Runs
 
 The full AAPL CustomQNN regression pipeline is substantially more expensive:

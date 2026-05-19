@@ -230,11 +230,10 @@ with tabs[6]:
         "Progress log": DOCS / "progress_log.md",
         "Paper queue": DOCS / "paper_queue.md",
         "Local testing guide": DOCS / "local_testing_guide.md",
-        "WordPress guide": DOCS / "wordpress_guide.md",
-        "Interim presentation outline": DOCS / "interim_presentation_outline.md",
     }
     for title, path in docs.items():
         st.markdown(f"- **{title}**: `{path.relative_to(ROOT)}`")
     st.markdown("### External references")
+    st.markdown("- [HQNN-FSP: A Hybrid Classical-Quantum Neural Network for Regression-Based Financial Stock Market Prediction](https://arxiv.org/abs/2503.15403)")
     st.markdown("- [Contextual Quantum Neural Networks for Stock Price Prediction](https://www.nature.com/articles/s41598-025-34413-5)")
     st.markdown("- [Quantum inspired qubit qutrit neural networks for real time financial forecasting](https://www.nature.com/articles/s41598-025-09475-0)")

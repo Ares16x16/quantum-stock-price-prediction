@@ -56,8 +56,8 @@ def run_quick_prediction(
     symbol: str,
     start: str = "2018-01-01",
     context_length: int = 2,
-    epochs: int = 5,
-    max_samples: int = 256,
+    epochs: int = 20,
+    max_samples: int = 128,
 ) -> tuple[QuickPrediction, pd.DataFrame]:
     """Run a cached lightweight prediction for one selected ticker."""
 
@@ -76,7 +76,16 @@ def run_quick_prediction(
     train_x, test_x = contexts[:split], contexts[split:]
     train_y, test_y = targets[:split], targets[split:]
 
-    model = ContextualQNN(ContextualQNNConfig(context_length=context_length, horizon=1, seed=42))
+    model = ContextualQNN(
+        ContextualQNNConfig(
+            context_length=context_length,
+            horizon=1,
+            num_layers=4,
+            seed=42,
+            learning_rate=0.3,
+            spsa_perturbation=0.01,
+        )
+    )
     model.fit(train_x, train_y, epochs=epochs)
     pred = model.predict(test_x)
     metrics = binary_direction_metrics(test_y, pred)

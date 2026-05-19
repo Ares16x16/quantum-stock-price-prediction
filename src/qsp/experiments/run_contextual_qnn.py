@@ -33,6 +33,7 @@ def _paper_result_row(
     depth: int,
     source: str,
     note: str,
+    config_note: str,
 ) -> dict[str, object]:
     source_note = f"Data source: {source}."
     if note:
@@ -50,7 +51,7 @@ def _paper_result_row(
         "Inference time": inference_time,
         "Parameter count": parameter_count,
         "Circuit depth": depth,
-        "Notes": f"{epochs} epochs, {samples} context-target samples. {source_note}",
+        "Notes": f"{epochs} epochs, {samples} context-target samples. {config_note}. {source_note}",
     }
 
 
@@ -61,6 +62,9 @@ def run_single_asset(
     context_length: int = 2,
     epochs: int = 100,
     max_samples: int = 128,
+    num_layers: int = 4,
+    learning_rate: float = 0.3,
+    spsa_perturbation: float = 0.01,
 ) -> pd.DataFrame:
     output_dir.mkdir(parents=True, exist_ok=True)
     data, source, source_note = _asset_contexts(symbol, start, context_length, 1)
@@ -70,7 +74,14 @@ def run_single_asset(
     train_x, test_x = contexts[:split], contexts[split:]
     train_y, test_y = targets[:split], targets[split:]
 
-    config = ContextualQNNConfig(context_length=context_length, horizon=1, seed=42)
+    config = ContextualQNNConfig(
+        context_length=context_length,
+        horizon=1,
+        num_layers=num_layers,
+        seed=42,
+        learning_rate=learning_rate,
+        spsa_perturbation=spsa_perturbation,
+    )
     model = ContextualQNN(config)
     started = time.perf_counter()
     losses = model.fit(train_x, train_y, epochs=epochs)
@@ -94,6 +105,10 @@ def run_single_asset(
             "probability_up": proba,
         }
     ).to_csv(output_dir / f"{symbol}_predictions.csv", index=False)
+    config_note = (
+        f"num_layers={num_layers}, learning_rate={learning_rate}, "
+        f"spsa_perturbation={spsa_perturbation}"
+    )
     result = pd.DataFrame(
         [
             _paper_result_row(
@@ -109,6 +124,7 @@ def run_single_asset(
                 model.circuit_depth_estimate,
                 source,
                 source_note,
+                config_note,
             )
         ]
     )
@@ -123,6 +139,9 @@ def run_two_asset_qmtl(
     context_length: int,
     epochs: int,
     max_samples_per_asset: int,
+    num_layers: int = 3,
+    learning_rate: float = 0.1,
+    spsa_perturbation: float = 0.01,
 ) -> pd.DataFrame:
     if len(symbols) != 2:
         raise ValueError("The first QMTL scaffold expects exactly two assets.")
@@ -145,7 +164,16 @@ def run_two_asset_qmtl(
     asset_ids = make_qmtl_asset_ids([len(x) for x in contexts_list])
 
     split = int(len(contexts) * 0.8)
-    model = ContextualQNN(ContextualQNNConfig(context_length=context_length, num_assets=2, seed=42))
+    model = ContextualQNN(
+        ContextualQNNConfig(
+            context_length=context_length,
+            num_layers=num_layers,
+            num_assets=2,
+            seed=42,
+            learning_rate=learning_rate,
+            spsa_perturbation=spsa_perturbation,
+        )
+    )
     started = time.perf_counter()
     losses = model.fit(contexts[:split], targets[:split], asset_ids[:split], epochs=epochs)
     train_time = time.perf_counter() - started
@@ -157,6 +185,10 @@ def run_two_asset_qmtl(
     pd.DataFrame({"epoch": range(1, len(losses) + 1), "fidelity_loss": losses}).to_csv(
         output_dir / "qmtl_two_asset_loss.csv",
         index=False,
+    )
+    config_note = (
+        f"num_layers={num_layers}, learning_rate={learning_rate}, "
+        f"spsa_perturbation={spsa_perturbation}"
     )
     result = pd.DataFrame(
         [
@@ -173,6 +205,7 @@ def run_two_asset_qmtl(
                 model.circuit_depth_estimate,
                 "+".join(sorted(set(sources))),
                 " ".join(notes),
+                config_note,
             )
         ]
     )
@@ -188,14 +221,41 @@ def main() -> None:
     parser.add_argument("--context-length", type=int, default=2)
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--max-samples", type=int, default=128)
+    parser.add_argument("--num-layers", type=int, default=4)
+    parser.add_argument("--learning-rate", type=float, default=0.3)
+    parser.add_argument("--spsa-perturbation", type=float, default=0.01)
     parser.add_argument("--qmtl", action="store_true")
     parser.add_argument("--qmtl-symbols", nargs=2, default=["AAPL", "MSFT"])
     args = parser.parse_args()
 
     if args.qmtl:
-        print(run_two_asset_qmtl(args.qmtl_symbols, args.start, args.output_dir, args.context_length, args.epochs, args.max_samples))
+        print(
+            run_two_asset_qmtl(
+                args.qmtl_symbols,
+                args.start,
+                args.output_dir,
+                args.context_length,
+                args.epochs,
+                args.max_samples,
+                num_layers=args.num_layers,
+                learning_rate=args.learning_rate,
+                spsa_perturbation=args.spsa_perturbation,
+            )
+        )
     else:
-        print(run_single_asset(args.symbol, args.start, args.output_dir, args.context_length, args.epochs, args.max_samples))
+        print(
+            run_single_asset(
+                args.symbol,
+                args.start,
+                args.output_dir,
+                args.context_length,
+                args.epochs,
+                args.max_samples,
+                num_layers=args.num_layers,
+                learning_rate=args.learning_rate,
+                spsa_perturbation=args.spsa_perturbation,
+            )
+        )
 
 
 if __name__ == "__main__":
