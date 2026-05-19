@@ -132,7 +132,7 @@ def run_single_asset(
     return result
 
 
-def run_two_asset_qmtl(
+def run_multi_asset_qmtl(
     symbols: list[str],
     start: str,
     output_dir: Path,
@@ -142,9 +142,10 @@ def run_two_asset_qmtl(
     num_layers: int = 3,
     learning_rate: float = 0.1,
     spsa_perturbation: float = 0.01,
+    result_prefix: str | None = None,
 ) -> pd.DataFrame:
-    if len(symbols) != 2:
-        raise ValueError("The first QMTL scaffold expects exactly two assets.")
+    if len(symbols) < 2:
+        raise ValueError("QMTL expects at least two assets.")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     contexts_list = []
@@ -168,7 +169,7 @@ def run_two_asset_qmtl(
         ContextualQNNConfig(
             context_length=context_length,
             num_layers=num_layers,
-            num_assets=2,
+            num_assets=len(symbols),
             seed=42,
             learning_rate=learning_rate,
             spsa_perturbation=spsa_perturbation,
@@ -182,8 +183,11 @@ def run_two_asset_qmtl(
     inference_time = time.perf_counter() - infer_start
     metrics = binary_direction_metrics(targets[split:], pred)
 
+    if result_prefix is None:
+        result_prefix = f"qmtl_{len(symbols)}_asset"
+
     pd.DataFrame({"epoch": range(1, len(losses) + 1), "fidelity_loss": losses}).to_csv(
-        output_dir / "qmtl_two_asset_loss.csv",
+        output_dir / f"{result_prefix}_loss.csv",
         index=False,
     )
     config_note = (
@@ -209,8 +213,33 @@ def run_two_asset_qmtl(
             )
         ]
     )
-    result.to_csv(output_dir / "qmtl_two_asset_result_table.csv", index=False)
+    result.to_csv(output_dir / f"{result_prefix}_result_table.csv", index=False)
     return result
+
+
+def run_two_asset_qmtl(
+    symbols: list[str],
+    start: str,
+    output_dir: Path,
+    context_length: int,
+    epochs: int,
+    max_samples_per_asset: int,
+    num_layers: int = 3,
+    learning_rate: float = 0.1,
+    spsa_perturbation: float = 0.01,
+) -> pd.DataFrame:
+    return run_multi_asset_qmtl(
+        symbols=symbols,
+        start=start,
+        output_dir=output_dir,
+        context_length=context_length,
+        epochs=epochs,
+        max_samples_per_asset=max_samples_per_asset,
+        num_layers=num_layers,
+        learning_rate=learning_rate,
+        spsa_perturbation=spsa_perturbation,
+        result_prefix="qmtl_two_asset",
+    )
 
 
 def main() -> None:
@@ -225,18 +254,18 @@ def main() -> None:
     parser.add_argument("--learning-rate", type=float, default=0.3)
     parser.add_argument("--spsa-perturbation", type=float, default=0.01)
     parser.add_argument("--qmtl", action="store_true")
-    parser.add_argument("--qmtl-symbols", nargs=2, default=["AAPL", "MSFT"])
+    parser.add_argument("--qmtl-symbols", nargs="+", default=["AAPL", "MSFT"])
     args = parser.parse_args()
 
     if args.qmtl:
         print(
-            run_two_asset_qmtl(
-                args.qmtl_symbols,
-                args.start,
-                args.output_dir,
-                args.context_length,
-                args.epochs,
-                args.max_samples,
+            run_multi_asset_qmtl(
+                symbols=args.qmtl_symbols,
+                start=args.start,
+                output_dir=args.output_dir,
+                context_length=args.context_length,
+                epochs=args.epochs,
+                max_samples_per_asset=args.max_samples,
                 num_layers=args.num_layers,
                 learning_rate=args.learning_rate,
                 spsa_perturbation=args.spsa_perturbation,

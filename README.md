@@ -24,6 +24,7 @@ It also includes:
 - a preserved Qiskit circuit reproduction;
 - a trainable `EstimatorQNN` pipeline;
 - classical LSTM and naive baselines;
+- a separate GPU-friendly sequence hybrid experiment;
 - saved experiment artifacts under `output/`;
 - a Streamlit dashboard for result review and lightweight interaction.
 
@@ -32,6 +33,7 @@ It also includes:
 - The HQNN-FSP circuit has been reproduced in Qiskit and wrapped into a trainable `EstimatorQNN` without changing the gate sequence.
 - The ContextualQNN path runs locally on live `yfinance` data and supports single-asset and two-asset QMTL experiments.
 - The qubit/qutrit paper path runs locally as ANN, QQBN, and QQTN direction-classification experiments.
+- The repository also includes a separate `BiLSTM-QQTN` experiment for stronger GPU-friendly local hybrid testing.
 - The Streamlit dashboard works locally and now uses live `yfinance` downloads again.
 - The full CustomQNN and HybridQNN1 regression paths still underperform the naive previous-close baseline and their prediction curves remain near-flat under limited simulator training.
 
@@ -50,6 +52,7 @@ It also includes:
 |   |-- contextual_qnn_multilevel/
 |   |-- qnn_diagnostic_aapl/
 |   |-- qnn_full_aapl/
+|   |-- sequence_hybrid_aapl/
 |   `-- quantum_inspired/
 |-- scripts/
 |   |-- run_checks.py
@@ -73,6 +76,29 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
+
+### 1a. Install the CUDA PyTorch stack for this machine
+
+This project can use the GPU for the PyTorch-based models, but not for the
+Qiskit `EstimatorQNN` core itself. On this Windows machine with NVIDIA CUDA
+support, install the CUDA build with:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-gpu-cu128.txt
+```
+
+If you are replacing an existing CPU-only torch install, first close any
+running Python, Streamlit, or notebook process that is using `.venv`, then run:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip uninstall -y torch torchvision torchaudio
+.\.venv\Scripts\python.exe -m pip install -r requirements-gpu-cu128.txt
+```
+
+Current limitation:
+
+- CUDA is available for the PyTorch-based models.
+- The preserved Qiskit `EstimatorQNN` path is still CPU-bound unless a compatible `qiskit-aer` backend is installed separately.
 
 ### 2. Set import paths
 
@@ -107,6 +133,13 @@ This performs:
 - ContextualQNN two-asset QMTL run;
 - ANN / QQBN / QQTN AAPL run.
 
+For the stronger GPU-friendly hybrid experiment:
+
+```powershell
+$env:PYTHONPATH='src;.'
+.\.venv\Scripts\python.exe -m qsp.experiments.run_sequence_hybrid --symbol AAPL --epochs 70 --max-rows 1000 --window-size 24 --hidden-dim 96 --learning-rate 0.0008 --output-dir output\sequence_hybrid_aapl
+```
+
 ### Launch the dashboard
 
 ```powershell
@@ -129,6 +162,7 @@ The Streamlit dashboard includes:
 - **Circuit Viewer**: original and trainable Qiskit circuit diagrams;
 - **Interactive Prediction**: ticker selector plus lightweight ContextualQNN direction prediction;
 - **Advanced ContextualQNN**: higher-resolution `d=4` return-bucket prediction on a separate tab;
+- **Experiment Lab**: saved GPU-friendly sequence hybrid results with a qutrit-inspired head;
 - **Saved AAPL Results**: plots for LSTM, CustomQNN, and HybridQNN1;
 - **Paper Tracker**: plain-language project progress and paper coverage notes;
 - **Docs & Links**: direct paths to the repository notes.
@@ -155,6 +189,14 @@ The dashboard will:
 4. Press **Run d=4 prediction**.
 
 This page uses density-based return buckets with `d=4`, context length `T=2`, and a lightweight statevector model. It predicts the next return regime rather than the exact next close, and it shows the full bucket probability distribution.
+
+### How to use the experiment lab
+
+1. Open the **Experiment Lab** tab.
+2. Review the saved AAPL result table for the stronger local hybrid experiment.
+3. Switch between the `BiLSTM baseline` and `BiLSTM-QQTN hybrid` plots.
+
+This tab shows saved artifacts rather than live browser-side training. The plotted curve is an implied next-close path derived from direction probabilities, so it looks richer than the preserved Qiskit regression curves while still remaining separate from the preserved HQNN-FSP circuit.
 
 If `yfinance` is unavailable, the dashboard falls back to deterministic sample data and labels that result clearly.
 
@@ -260,6 +302,22 @@ Model interpretation:
 - `QQBN`: qubit-inspired two-state feature expansion;
 - `QQTN`: qutrit-inspired three-state feature expansion.
 
+### 4. Sequence Hybrid Extension
+
+This is a repository extension rather than an exact paper reproduction. Its purpose is practical: to test whether a stronger temporal encoder combined with a quantum-inspired head can produce a better local hybrid artifact on GPU without modifying the preserved HQNN-FSP circuit.
+
+Run it with:
+
+```powershell
+$env:PYTHONPATH='src;.'
+.\.venv\Scripts\python.exe -m qsp.experiments.run_sequence_hybrid --symbol AAPL --epochs 70 --max-rows 1000 --window-size 24 --hidden-dim 96 --learning-rate 0.0008 --output-dir output\sequence_hybrid_aapl
+```
+
+Current saved AAPL result:
+
+- `BiLSTM baseline`: `RMSE 3.7144`, `MAE 2.6781`, `Directional Accuracy 0.5250`
+- `BiLSTM-QQTN hybrid`: `RMSE 3.7154`, `MAE 2.6731`, `Directional Accuracy 0.5250`
+
 ## Saved Outputs
 
 ### Main output folders
@@ -274,6 +332,8 @@ Model interpretation:
   higher-resolution `d=4` ContextualQNN artifacts
 - `output/quantum_inspired/`
   ANN / QQBN / QQTN result tables and loss curves
+- `output/sequence_hybrid_aapl/`
+  GPU-friendly sequence hybrid result table, loss curves, and implied price plots
 
 ## Why Some QNN Curves Are Flat
 
@@ -295,6 +355,7 @@ Practical on a normal laptop:
 - ContextualQNN AAPL run;
 - ContextualQNN two-asset QMTL run;
 - ANN / QQBN / QQTN live-data run;
+- GPU-friendly `BiLSTM-QQTN` sequence hybrid run;
 - diagnostic CustomQNN plots on smaller subsets.
 
 Expensive or limited locally:
@@ -340,9 +401,11 @@ $env:PYTHONPATH='src;.'
 - [Project Progress](D:\coding_workspace\master%20capstone\quantum-stock-price-prediction\docs\progress_log.md)
 - [Paper Coverage](D:\coding_workspace\master%20capstone\quantum-stock-price-prediction\docs\paper_queue.md)
 - [Local Testing Guide](D:\coding_workspace\master%20capstone\quantum-stock-price-prediction\docs\local_testing_guide.md)
+- [Related Papers](D:\coding_workspace\master%20capstone\quantum-stock-price-prediction\docs\related_papers.md)
 
 ## References
 
 - [HQNN-FSP arXiv 2503.15403v1](https://arxiv.org/abs/2503.15403)
 - [Contextual Quantum Neural Networks for Stock Price Prediction](https://www.nature.com/articles/s41598-025-34413-5)
 - [Quantum Inspired Qubit Qutrit Neural Networks for Real Time Financial Forecasting](https://www.nature.com/articles/s41598-025-09475-0)
+- [BLS-QLSTM: a novel hybrid quantum neural network for stock index forecasting](https://www.nature.com/articles/s41599-025-05348-z)

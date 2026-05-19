@@ -63,6 +63,7 @@ try:
     from sklearn.metrics import mean_absolute_error, mean_squared_error
     from sklearn.preprocessing import MinMaxScaler
     from torch import nn
+    from torch.optim.lr_scheduler import ReduceLROnPlateau
     from torch.utils.data import DataLoader, TensorDataset
 except Exception:
     print("Third-party dependency import failed. Installed versions:")
@@ -101,6 +102,14 @@ RESULT_COLUMNS = [
     "Circuit depth",
     "Notes",
 ]
+
+
+def resolve_torch_device(prefer_cuda: bool = True) -> torch.device:
+    """Return the best available torch device for local training."""
+
+    if prefer_cuda and torch.cuda.is_available():
+        return torch.device("cuda")
+    return torch.device("cpu")
 
 
 @dataclass(frozen=True)
@@ -843,6 +852,25 @@ def inverse_target(dataset: FinancialDataset, y_scaled: np.ndarray) -> np.ndarra
     return dataset.target_scaler.inverse_transform(np.asarray(y_scaled).reshape(-1, 1))
 
 
+def split_train_validation(
+    x: np.ndarray,
+    y: np.ndarray,
+    val_ratio: float = 0.15,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Create a time-ordered train/validation split from the training set."""
+
+    if not 0.0 <= val_ratio < 0.5:
+        raise ValueError("val_ratio must be in [0.0, 0.5).")
+    if len(x) != len(y):
+        raise ValueError("x and y must contain the same number of samples.")
+    if len(x) < 4 or val_ratio == 0.0:
+        return x, y, x, y
+
+    split_idx = max(1, int(len(x) * (1.0 - val_ratio)))
+    split_idx = min(split_idx, len(x) - 1)
+    return x[:split_idx], y[:split_idx], x[split_idx:], y[split_idx:]
+
+
 def rmse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """Root mean squared error."""
 
@@ -917,41 +945,77 @@ def train_lstm_baseline(
     learning_rate: float = 1e-3,
     hidden_size: int = 32,
     seed: int = 42,
+    val_ratio: float = 0.15,
+    patience: int = 5,
+    gradient_clip: float = 1.0,
+    device: torch.device | None = None,
 ) -> tuple[LSTMRegressor, dict[str, object]]:
     """Train the classical LSTM baseline."""
 
     torch.manual_seed(seed)
-    model = LSTMRegressor(input_size=dataset.train_seq_x.shape[-1], hidden_size=hidden_size)
+    device = resolve_torch_device() if device is None else device
+    model = LSTMRegressor(input_size=dataset.train_seq_x.shape[-1], hidden_size=hidden_size).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=2)
     loss_fn = nn.MSELoss()
+    train_x, train_y, val_x, val_y = split_train_validation(dataset.train_seq_x, dataset.train_y_scaled, val_ratio)
     loader = DataLoader(
         TensorDataset(
-            torch.tensor(dataset.train_seq_x, dtype=torch.float32),
-            torch.tensor(dataset.train_y_scaled, dtype=torch.float32),
+            torch.tensor(train_x, dtype=torch.float32),
+            torch.tensor(train_y, dtype=torch.float32),
         ),
         batch_size=batch_size,
         shuffle=False,
     )
+    val_x_t = torch.tensor(val_x, dtype=torch.float32, device=device)
+    val_y_t = torch.tensor(val_y, dtype=torch.float32, device=device)
 
     losses: list[float] = []
+    train_losses: list[float] = []
+    best_state: dict[str, torch.Tensor] | None = None
+    best_val = float("inf")
+    patience_count = 0
     start_time = time.perf_counter()
-    model.train()
     for _ in range(epochs):
+        model.train()
         epoch_losses: list[float] = []
         for batch_x, batch_y in loader:
+            batch_x = batch_x.to(device)
+            batch_y = batch_y.to(device)
             optimizer.zero_grad()
             pred = model(batch_x)
             loss = loss_fn(pred, batch_y)
             loss.backward()
+            if gradient_clip > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
             optimizer.step()
             epoch_losses.append(float(loss.item()))
-        losses.append(float(np.mean(epoch_losses)))
+        train_loss = float(np.mean(epoch_losses))
+
+        model.eval()
+        with torch.no_grad():
+            val_pred = model(val_x_t)
+            val_loss = float(loss_fn(val_pred, val_y_t).item())
+
+        train_losses.append(train_loss)
+        losses.append(val_loss)
+        scheduler.step(val_loss)
+        if val_loss < best_val:
+            best_val = val_loss
+            best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
+            patience_count = 0
+        else:
+            patience_count += 1
+            if patience_count >= patience:
+                break
     training_time = time.perf_counter() - start_time
+    if best_state is not None:
+        model.load_state_dict(best_state)
 
     model.eval()
     infer_start = time.perf_counter()
     with torch.no_grad():
-        pred_scaled = model(torch.tensor(dataset.test_seq_x, dtype=torch.float32)).numpy()
+        pred_scaled = model(torch.tensor(dataset.test_seq_x, dtype=torch.float32, device=device)).cpu().numpy()
     inference_time = time.perf_counter() - infer_start
     pred_price = inverse_target(dataset, pred_scaled)
     metrics = regression_metrics(dataset.test_y_price, pred_price, dataset.test_prev_close)
@@ -959,10 +1023,12 @@ def train_lstm_baseline(
     history = {
         **metrics,
         "losses": losses,
+        "train_losses": train_losses,
         "pred_price": pred_price,
         "Training time": training_time,
         "Inference time": inference_time,
         "Parameter count": count_torch_parameters(model),
+        "Device": str(device),
     }
     return model, history
 
@@ -973,6 +1039,9 @@ def train_standalone_qnn(
     batch_size: int = 8,
     learning_rate: float = 0.02,
     seed: int = 42,
+    val_ratio: float = 0.15,
+    patience: int = 3,
+    gradient_clip: float = 1.0,
 ) -> tuple[TorchConnector, dict[str, object]]:
     """Train the custom circuit directly as a one-output QNN regressor."""
 
@@ -982,32 +1051,65 @@ def train_standalone_qnn(
     qnn = create_estimator_qnn(circuit, input_params, weight_params, input_gradients=True)
     model = create_torch_qnn_layer(qnn, seed=seed)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=1)
     loss_fn = nn.MSELoss()
 
     y_train_expectation = scaled_target_to_expectation(dataset.train_y_scaled)
+    train_x, train_y, val_x, val_y = split_train_validation(
+        dataset.train_qnn_x,
+        y_train_expectation,
+        val_ratio,
+    )
     loader = DataLoader(
         TensorDataset(
-            torch.tensor(dataset.train_qnn_x, dtype=torch.float32),
-            torch.tensor(y_train_expectation, dtype=torch.float32),
+            torch.tensor(train_x, dtype=torch.float32),
+            torch.tensor(train_y, dtype=torch.float32),
         ),
         batch_size=batch_size,
         shuffle=False,
     )
+    val_x_t = torch.tensor(val_x, dtype=torch.float32)
+    val_y_t = torch.tensor(val_y, dtype=torch.float32)
 
     losses: list[float] = []
+    train_losses: list[float] = []
+    best_state: dict[str, torch.Tensor] | None = None
+    best_val = float("inf")
+    patience_count = 0
     start_time = time.perf_counter()
-    model.train()
     for _ in range(epochs):
+        model.train()
         epoch_losses: list[float] = []
         for batch_x, batch_y in loader:
             optimizer.zero_grad()
             pred = model(batch_x).view_as(batch_y)
             loss = loss_fn(pred, batch_y)
             loss.backward()
+            if gradient_clip > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
             optimizer.step()
             epoch_losses.append(float(loss.item()))
-        losses.append(float(np.mean(epoch_losses)))
+        train_loss = float(np.mean(epoch_losses))
+
+        model.eval()
+        with torch.no_grad():
+            val_pred = model(val_x_t).view_as(val_y_t)
+            val_loss = float(loss_fn(val_pred, val_y_t).item())
+
+        train_losses.append(train_loss)
+        losses.append(val_loss)
+        scheduler.step(val_loss)
+        if val_loss < best_val:
+            best_val = val_loss
+            best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
+            patience_count = 0
+        else:
+            patience_count += 1
+            if patience_count >= patience:
+                break
     training_time = time.perf_counter() - start_time
+    if best_state is not None:
+        model.load_state_dict(best_state)
 
     model.eval()
     infer_start = time.perf_counter()
@@ -1021,11 +1123,13 @@ def train_standalone_qnn(
     history = {
         **metrics,
         "losses": losses,
+        "train_losses": train_losses,
         "pred_price": pred_price,
         "Training time": training_time,
         "Inference time": inference_time,
         "Parameter count": qnn.num_weights,
         "Circuit depth": circuit.depth(),
+        "Device": "cpu",
     }
     return model, history
 
@@ -1078,6 +1182,9 @@ def train_hybrid_qnn1(
     learning_rate: float = 0.001,
     hidden_size: int = 32,
     seed: int = 42,
+    val_ratio: float = 0.15,
+    patience: int = 3,
+    gradient_clip: float = 1.0,
 ) -> tuple[HybridQNN1, dict[str, object]]:
     """Train HybridQNN1: LSTM sequential processing plus QNN regression layer."""
 
@@ -1090,31 +1197,64 @@ def train_hybrid_qnn1(
         seed=seed,
     )
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=1)
     loss_fn = nn.MSELoss()
     y_train_expectation = scaled_target_to_expectation(dataset.train_y_scaled)
+    train_x, train_y, val_x, val_y = split_train_validation(
+        dataset.train_seq_x,
+        y_train_expectation,
+        val_ratio,
+    )
     loader = DataLoader(
         TensorDataset(
-            torch.tensor(dataset.train_seq_x, dtype=torch.float32),
-            torch.tensor(y_train_expectation, dtype=torch.float32),
+            torch.tensor(train_x, dtype=torch.float32),
+            torch.tensor(train_y, dtype=torch.float32),
         ),
         batch_size=batch_size,
         shuffle=False,
     )
+    val_x_t = torch.tensor(val_x, dtype=torch.float32)
+    val_y_t = torch.tensor(val_y, dtype=torch.float32)
 
     losses: list[float] = []
+    train_losses: list[float] = []
+    best_state: dict[str, torch.Tensor] | None = None
+    best_val = float("inf")
+    patience_count = 0
     start_time = time.perf_counter()
-    model.train()
     for _ in range(epochs):
+        model.train()
         epoch_losses: list[float] = []
         for batch_x, batch_y in loader:
             optimizer.zero_grad()
             pred = model(batch_x).view_as(batch_y)
             loss = loss_fn(pred, batch_y)
             loss.backward()
+            if gradient_clip > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
             optimizer.step()
             epoch_losses.append(float(loss.item()))
-        losses.append(float(np.mean(epoch_losses)))
+        train_loss = float(np.mean(epoch_losses))
+
+        model.eval()
+        with torch.no_grad():
+            val_pred = model(val_x_t).view_as(val_y_t)
+            val_loss = float(loss_fn(val_pred, val_y_t).item())
+
+        train_losses.append(train_loss)
+        losses.append(val_loss)
+        scheduler.step(val_loss)
+        if val_loss < best_val:
+            best_val = val_loss
+            best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
+            patience_count = 0
+        else:
+            patience_count += 1
+            if patience_count >= patience:
+                break
     training_time = time.perf_counter() - start_time
+    if best_state is not None:
+        model.load_state_dict(best_state)
 
     model.eval()
     infer_start = time.perf_counter()
@@ -1128,11 +1268,13 @@ def train_hybrid_qnn1(
     history = {
         **metrics,
         "losses": losses,
+        "train_losses": train_losses,
         "pred_price": pred_price,
         "Training time": training_time,
         "Inference time": inference_time,
         "Parameter count": count_torch_parameters(model),
         "Circuit depth": circuit.depth(),
+        "Device": "cpu",
     }
     return model, history
 

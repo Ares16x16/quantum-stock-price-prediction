@@ -19,6 +19,7 @@ from qsp.models.quantum_inspired import (
     QQBNClassifier,
     QQTNClassifier,
     count_trainable_parameters,
+    default_device,
     predict_binary_classifier,
     train_binary_classifier,
 )
@@ -77,14 +78,16 @@ def run_quantum_inspired_experiment(
     symbol: str = "AAPL",
     start: str = "2018-01-01",
     output_dir: Path = Path("output/quantum_inspired"),
-    epochs: int = 60,
+    epochs: int = 120,
     max_samples: int = 420,
-    hidden_dim: int = 48,
+    hidden_dim: int = 64,
+    learning_rate: float = 0.005,
 ) -> pd.DataFrame:
     """Train ANN, QQBN, and QQTN on next-day direction prediction."""
 
     output_dir.mkdir(parents=True, exist_ok=True)
     torch.manual_seed(42)
+    device = default_device()
     train_x, test_x, train_y, test_y, next_returns, source, source_note = _prepare_direction_data(
         symbol,
         start,
@@ -102,17 +105,40 @@ def run_quantum_inspired_experiment(
         torch.manual_seed(42)
         model = factory(input_dim=train_x.shape[1], hidden_dim=hidden_dim)
         started = time.perf_counter()
-        history = train_binary_classifier(model, train_x, train_y, epochs=epochs, learning_rate=0.01, seed=42)
+        history = train_binary_classifier(
+            model,
+            train_x,
+            train_y,
+            epochs=epochs,
+            learning_rate=learning_rate,
+            seed=42,
+            batch_size=64,
+            val_ratio=0.15,
+            patience=12,
+            weight_decay=1e-4,
+            gradient_clip=1.0,
+            device=device,
+            balance_classes=False,
+        )
         train_time = time.perf_counter() - started
 
         infer_start = time.perf_counter()
-        pred, probabilities = predict_binary_classifier(model, test_x)
+        pred, probabilities = predict_binary_classifier(model, test_x, device=device)
         inference_time = time.perf_counter() - infer_start
         metrics = binary_direction_metrics(test_y, pred)
         sharpe = _strategy_sharpe(pred, next_returns)
         info_coef = _information_coefficient(probabilities, next_returns)
         _save_loss_plot(output_dir, model_name, history.losses)
-        logs.extend({"model": model_name, "epoch": index + 1, "loss": loss} for index, loss in enumerate(history.losses))
+        logs.extend(
+            {
+                "model": model_name,
+                "epoch": index + 1,
+                "train_loss": history.train_losses[index] if index < len(history.train_losses) else np.nan,
+                "val_loss": loss,
+                "device": history.device,
+            }
+            for index, loss in enumerate(history.losses)
+        )
 
         if model_name == "ANN":
             notes = "Classical neural-network baseline from the qubit/qutrit paper."
@@ -144,7 +170,10 @@ def run_quantum_inspired_experiment(
                 "Sharpe ratio": sharpe,
                 "Information coefficient": info_coef,
                 "Data source": source,
-                "Notes": f"{notes} Training used Adam, BCEWithLogitsLoss, hidden_dim={hidden_dim}, epochs={epochs}.",
+                "Notes": (
+                    f"{notes} Training used Adam, BCEWithLogitsLoss, hidden_dim={hidden_dim}, "
+                    f"epochs={epochs}, learning_rate={learning_rate}, device={history.device}."
+                ),
             }
         )
 
@@ -161,9 +190,10 @@ def main() -> None:
     parser.add_argument("--symbol", default="AAPL")
     parser.add_argument("--start", default="2018-01-01")
     parser.add_argument("--output-dir", type=Path, default=Path("output/quantum_inspired"))
-    parser.add_argument("--epochs", type=int, default=60)
+    parser.add_argument("--epochs", type=int, default=120)
     parser.add_argument("--max-samples", type=int, default=420)
-    parser.add_argument("--hidden-dim", type=int, default=48)
+    parser.add_argument("--hidden-dim", type=int, default=64)
+    parser.add_argument("--learning-rate", type=float, default=0.005)
     args = parser.parse_args()
     print(
         run_quantum_inspired_experiment(
@@ -173,6 +203,7 @@ def main() -> None:
             epochs=args.epochs,
             max_samples=args.max_samples,
             hidden_dim=args.hidden_dim,
+            learning_rate=args.learning_rate,
         )
     )
 

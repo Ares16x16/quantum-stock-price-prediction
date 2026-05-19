@@ -1,0 +1,2 @@
+Model name,Dataset / asset,Number of qubits,VQC layers,Feature set,RMSE,MAE,Directional Accuracy,Training time,Inference time,Parameter count,Circuit depth,Notes
+ContextualQNN-QMTL,AAPL+MSFT+GOOGL+AMZN,3,1,"Binary return context, d=2, T=2, tau=1",N/A,N/A,0.5324675324675324,6.930680800000118,0.0499571999971522,45,12,"240 epochs, 384 context-target samples. num_layers=3, learning_rate=0.1, spsa_perturbation=0.01. Data source: yfinance."

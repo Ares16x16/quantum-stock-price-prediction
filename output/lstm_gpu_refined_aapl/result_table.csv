@@ -1,0 +1,2 @@
+Model name,Dataset / asset,Number of qubits,VQC layers,Feature set,RMSE,MAE,Directional Accuracy,Training time,Inference time,Parameter count,Circuit depth,Notes
+Classical LSTM (GPU refined),AAPL,5,1,"Open, High, Low, Close, SMA5",7.943098842005378,6.280656814575195,0.4830917874396135,10.311859000001277,0.019301599997561425,18241,N/A,"Full dataset. GPU-enabled PyTorch LSTM with validation split, scheduler, and early stopping."

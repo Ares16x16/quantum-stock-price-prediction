@@ -12,6 +12,8 @@ The Qiskit `EstimatorQNN` and PyTorch `TorchConnector` path has also been tested
 
 The training path for this regression model is straightforward: normalized financial features are encoded as circuit inputs, the trainable circuit weights are optimized with Adam, and the loss is mean squared error on the scaled target. For the current full AAPL benchmark, the standalone CustomQNN and HybridQNN1 were both limited to one epoch because simulator-based gradients are slow on CPU.
 
+At the moment, the local environment has CUDA-enabled PyTorch but does not have `qiskit-aer` installed. That means the preserved `EstimatorQNN` path is still CPU-bound. GPU acceleration is available for the PyTorch-only experiments, but not yet for the preserved Qiskit regression circuit.
+
 ## AAPL Regression Baseline
 
 The AAPL regression run uses engineered OHLCV features and a time-ordered train/test split. The selected feature set is `Open`, `High`, `Low`, `Close`, and `SMA5`.
@@ -20,10 +22,11 @@ The AAPL regression run uses engineered OHLCV features and a time-ordered train/
 |---|---:|---:|---:|---:|
 | Naive previous-close | 4.0443 | 2.7724 | 0.0024 | 0.0000s |
 | Classical LSTM | 12.0400 | 9.6950 | 0.4915 | 1.8545s |
+| Classical LSTM (GPU refined) | 7.9431 | 6.2807 | 0.4831 | 10.3119s |
 | Standalone CustomQNN | 65.7847 | 57.4034 | 0.4625 | 627.3531s |
 | HybridQNN1 | 52.5749 | 46.0116 | 0.4649 | 593.7860s |
 
-These figures are an execution baseline rather than a final performance claim. On raw next-close prediction, the previous-close baseline is still very strong. This result supports a shift toward return and direction prediction for the next quantum experiments.
+These figures are an execution baseline rather than a final performance claim. On raw next-close prediction, the previous-close baseline is still very strong. The refined GPU LSTM narrows the gap substantially in RMSE and MAE, but it still does not beat the naive previous-close baseline on this setup. This result supports a shift toward return and direction prediction for the next quantum experiments.
 
 ## Contextual QNN Track
 
@@ -35,6 +38,7 @@ Current output files are stored in `output/contextual_qnn` and `output/contextua
 |---|---|---:|---:|---:|
 | ContextualQNN | AAPL | 128 | 0.6923 | 0.9493s |
 | ContextualQNN-QMTL | AAPL+MSFT | 320 | 0.5469 | 5.6619s |
+| ContextualQNN-QMTL | AAPL+MSFT+GOOGL+AMZN | 384 | 0.5325 | 6.9307s |
 | ContextualQNN-d4 | AAPL | 256 | 0.4231 | 31.8448s |
 
 All three contextual rows now use live yfinance data.
@@ -55,7 +59,23 @@ The third implementation track follows *Quantum Inspired Qubit Qutrit Neural Net
 | QQBN | Qubit-inspired two-state feature map | 0.5238 | 0.6154 | -0.0855 | -0.1071 |
 | QQTN | Qutrit-inspired three-state feature map | 0.5833 | 0.6789 | 2.9647 | 0.0798 |
 
-These models use normalized technical indicators, an 80/20 time-ordered split, Adam, and binary cross-entropy loss. The QQBN path encodes each feature into a two-state qubit-inspired representation, while QQTN uses a three-state qutrit-inspired representation before the trainable feed-forward layers. The current saved AAPL run uses live yfinance data.
+These models use normalized technical indicators, an 80/20 time-ordered split, Adam, and binary cross-entropy loss. The QQBN path encodes each feature into a two-state qubit-inspired representation, while QQTN uses a three-state qutrit-inspired representation before the trainable feed-forward layers. The current saved AAPL run uses live yfinance data. A later GPU-backed training refactor improved speed and made device usage explicit, but it did not consistently beat the earlier best QQTN accuracy on AAPL, so the original saved QQTN row remains the stronger benchmark in this repository.
+
+## Sequence Hybrid Experiment
+
+To explore a stronger local model without changing the preserved HQNN-FSP circuit, the repository now includes a separate GPU-friendly sequence hybrid path. This experiment uses a bidirectional LSTM encoder with attention pooling and compares:
+
+- a classical sequence baseline;
+- a qutrit-inspired hybrid head built on the same temporal encoder.
+
+The current AAPL run is stored in `output/sequence_hybrid_aapl`. It predicts next-day direction, then converts the direction probabilities into an implied next-close curve for visualization.
+
+| Model | RMSE | MAE | Directional Accuracy | Training Time |
+|---|---:|---:|---:|---:|
+| BiLSTM baseline | 3.7144 | 2.6781 | 0.5250 | 3.5769s |
+| BiLSTM-QQTN hybrid | 3.7154 | 2.6731 | 0.5250 | 1.1582s |
+
+This path does not claim an exact paper reproduction. Its role is different: it is a local experimental extension that combines a stronger temporal encoder with a quantum-inspired head so the dashboard can show a richer non-flat prediction curve under GPU-friendly training.
 
 ## Demo Status
 

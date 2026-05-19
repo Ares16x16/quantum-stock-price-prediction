@@ -19,6 +19,7 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 from torch import nn
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 
 class ANNClassifier(nn.Module):
@@ -92,6 +93,14 @@ class QQTNClassifier(nn.Module):
 class TrainingHistory:
     model_name: str
     losses: list[float]
+    train_losses: list[float]
+    device: str
+
+
+def default_device(prefer_cuda: bool = True) -> torch.device:
+    if prefer_cuda and torch.cuda.is_available():
+        return torch.device("cuda")
+    return torch.device("cpu")
 
 
 def count_trainable_parameters(model: nn.Module) -> int:
@@ -105,33 +114,99 @@ def train_binary_classifier(
     epochs: int = 20,
     learning_rate: float = 0.01,
     seed: int = 42,
+    batch_size: int = 64,
+    val_ratio: float = 0.15,
+    patience: int = 10,
+    weight_decay: float = 1e-4,
+    gradient_clip: float = 1.0,
+    device: torch.device | None = None,
+    balance_classes: bool = True,
 ) -> TrainingHistory:
     """Train a small binary classifier with BCE loss and Adam."""
 
     torch.manual_seed(seed)
-    model.train()
-    x = torch.as_tensor(np.asarray(train_x, dtype=np.float32).copy())
-    y = torch.as_tensor(np.asarray(train_y, dtype=np.float32).copy())
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    loss_fn = nn.BCEWithLogitsLoss()
+    device = default_device() if device is None else device
+    model = model.to(device)
+    x_all = np.asarray(train_x, dtype=np.float32).copy()
+    y_all = np.asarray(train_y, dtype=np.float32).copy().reshape(-1)
+    if len(x_all) != len(y_all):
+        raise ValueError("train_x and train_y must contain the same number of samples.")
+    split_idx = max(1, int(len(x_all) * (1.0 - val_ratio)))
+    split_idx = min(split_idx, len(x_all) - 1) if len(x_all) > 2 else len(x_all)
+    x_train = torch.as_tensor(x_all[:split_idx], dtype=torch.float32, device=device)
+    y_train = torch.as_tensor(y_all[:split_idx], dtype=torch.float32, device=device)
+    x_val = torch.as_tensor(x_all[split_idx:], dtype=torch.float32, device=device)
+    y_val = torch.as_tensor(y_all[split_idx:], dtype=torch.float32, device=device)
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+    scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=3)
+    if balance_classes:
+        positives = float(y_train.sum().item())
+        negatives = float(len(y_train) - positives)
+        pos_weight = torch.tensor([negatives / max(positives, 1.0)], dtype=torch.float32, device=device)
+        loss_fn = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    else:
+        loss_fn = nn.BCEWithLogitsLoss()
     losses: list[float] = []
+    train_losses: list[float] = []
+    best_state: dict[str, torch.Tensor] | None = None
+    best_val = float("inf")
+    patience_count = 0
 
     for _ in range(epochs):
-        optimizer.zero_grad()
-        logits = model(x)
-        loss = loss_fn(logits, y)
-        loss.backward()
-        optimizer.step()
-        losses.append(float(loss.detach().cpu()))
-    return TrainingHistory(model.__class__.__name__, losses)
+        model.train()
+        permutation = torch.arange(len(x_train), device=device)
+        batch_losses: list[float] = []
+        for start in range(0, len(permutation), batch_size):
+            batch_idx = permutation[start : start + batch_size]
+            batch_x = x_train[batch_idx]
+            batch_y = y_train[batch_idx]
+            optimizer.zero_grad()
+            logits = model(batch_x)
+            loss = loss_fn(logits, batch_y)
+            loss.backward()
+            if gradient_clip > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
+            optimizer.step()
+            batch_losses.append(float(loss.detach().cpu()))
+
+        train_loss = float(np.mean(batch_losses)) if batch_losses else 0.0
+        model.eval()
+        with torch.no_grad():
+            if len(x_val) > 0:
+                val_logits = model(x_val)
+                val_loss = float(loss_fn(val_logits, y_val).detach().cpu())
+            else:
+                val_loss = train_loss
+
+        train_losses.append(train_loss)
+        losses.append(val_loss)
+        scheduler.step(val_loss)
+        if val_loss < best_val:
+            best_val = val_loss
+            best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
+            patience_count = 0
+        else:
+            patience_count += 1
+            if patience_count >= patience:
+                break
+
+    if best_state is not None:
+        model.load_state_dict(best_state)
+    return TrainingHistory(model.__class__.__name__, losses, train_losses, str(device))
 
 
-def predict_binary_classifier(model: nn.Module, features: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def predict_binary_classifier(
+    model: nn.Module,
+    features: np.ndarray,
+    device: torch.device | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
     """Return class labels and positive-class probabilities."""
 
+    device = next(model.parameters()).device if device is None else device
     model.eval()
     with torch.no_grad():
-        x = torch.as_tensor(np.asarray(features, dtype=np.float32).copy())
+        x = torch.as_tensor(np.asarray(features, dtype=np.float32).copy(), device=device)
         probabilities = torch.sigmoid(model(x)).cpu().numpy()
     return (probabilities >= 0.5).astype(int), probabilities
 
@@ -142,6 +217,7 @@ __all__ = [
     "QQTNClassifier",
     "TrainingHistory",
     "count_trainable_parameters",
+    "default_device",
     "predict_binary_classifier",
     "train_binary_classifier",
 ]

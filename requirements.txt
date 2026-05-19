@@ -4,7 +4,7 @@ yfinance
 scikit-learn
 matplotlib
 pandas
-torch
 pylatexenc
 streamlit
 pytest
+pypdf

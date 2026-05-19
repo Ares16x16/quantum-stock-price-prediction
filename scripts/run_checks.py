@@ -76,14 +76,20 @@ def check_contextual_qnn() -> None:
 
 
 def check_web_demo_helpers() -> None:
-    from qsp.web_demo import SUPPORTED_TICKERS, run_multilevel_quick_prediction
+    from qsp.web_demo import SUPPORTED_TICKERS, run_multilevel_quick_prediction, run_quick_prediction
 
     assert "AAPL" in SUPPORTED_TICKERS
     assert "BTC-USD" in SUPPORTED_TICKERS
-    prediction, recent, probabilities = run_multilevel_quick_prediction("AAPL", epochs=1, max_samples=64)
+    prediction_binary, recent_binary, comparison_binary = run_quick_prediction("AAPL", epochs=1, max_samples=64)
+    assert prediction_binary.symbol == "AAPL"
+    assert not recent_binary.empty
+    assert not comparison_binary.empty
+
+    prediction, recent, probabilities, comparison = run_multilevel_quick_prediction("AAPL", epochs=1, max_samples=64)
     assert prediction.symbol == "AAPL"
     assert not recent.empty
     assert abs(float(probabilities["probability"].sum()) - 1.0) < 1e-9
+    assert not comparison.empty
     print("Web demo helper checks OK")
 
 
@@ -116,6 +122,25 @@ def check_quantum_inspired_models() -> None:
     print("Quantum-inspired model checks OK")
 
 
+def check_sequence_hybrids() -> None:
+    from qsp.models.sequence_hybrids import (
+        BidirectionalLSTMBaseline,
+        TemporalQQTNHybrid,
+        predict_sequence_classifier,
+        train_sequence_classifier,
+    )
+
+    train_x = np.random.default_rng(42).random((16, 6, 4), dtype=np.float32)
+    train_y = np.asarray([0, 1] * 8, dtype=int)
+    for model in [BidirectionalLSTMBaseline(4, hidden_dim=16), TemporalQQTNHybrid(4, hidden_dim=16, qutrit_dim=8)]:
+        history = train_sequence_classifier(model, train_x, train_y, epochs=1)
+        pred, proba = predict_sequence_classifier(model, train_x)
+        assert len(history.losses) == 1
+        assert pred.shape == train_y.shape
+        assert ((0.0 <= proba) & (proba <= 1.0)).all()
+    print("Sequence hybrid checks OK")
+
+
 def check_custom_qnn_architecture() -> None:
     from qsp.models.custom_qnn import build_custom_qnn_circuit, build_original_custom_qnn_circuit
 
@@ -134,6 +159,7 @@ def main() -> None:
     check_contextual_qnn()
     check_web_demo_helpers()
     check_quantum_inspired_models()
+    check_sequence_hybrids()
     check_custom_qnn_architecture()
     print("All lightweight checks passed")
 
