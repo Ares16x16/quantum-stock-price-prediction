@@ -539,13 +539,17 @@ def create_torch_qnn_layer(
     qnn: EstimatorQNN,
     seed: int = 42,
     init_scale: float = 0.1,
+    device: torch.device | None = None,
 ) -> TorchConnector:
     """Wrap an EstimatorQNN in a PyTorch-compatible trainable layer."""
 
     rng = np.random.default_rng(seed)
     initial_weights = init_scale * rng.uniform(-1.0, 1.0, size=qnn.num_weights)
-    return TorchConnector(qnn, initial_weights=initial_weights)
-
+    connector = TorchConnector(qnn, initial_weights=initial_weights)
+    if device is None:
+        device = resolve_torch_device()
+    connector.to(device)
+    return connector
 
 def scaled_target_to_expectation(y_scaled: np.ndarray) -> np.ndarray:
     """Map MinMax-scaled target values from [0, 1] to QNN range [-1, 1]."""
@@ -564,27 +568,29 @@ def run_dummy_sanity_test(
     num_layers: int = DEFAULT_NUM_LAYERS,
     learning_rate: float = 0.05,
     seed: int = 42,
+    device: torch.device | None = None,
 ) -> dict[str, object]:
-    """Run one forward/backward/optimizer step on dummy data."""
-
+    """Run one forward/backward/optimizer step on dummy data using GPU when available."""
     torch.manual_seed(seed)
     np.random.seed(seed)
+    if device is None:
+        device = resolve_torch_device()
     circuit, input_params, weight_params = build_custom_qnn_circuit(num_qubits, num_layers)
     qnn = create_estimator_qnn(circuit, input_params, weight_params, input_gradients=True)
-    qnn_layer = create_torch_qnn_layer(qnn, seed=seed)
+    qnn_layer = create_torch_qnn_layer(qnn, seed=seed, device=device)
 
-    x = torch.rand(1, len(input_params), dtype=torch.float32)
-    y = torch.tensor([[0.25]], dtype=torch.float32)
+    x = torch.rand(1, len(input_params), dtype=torch.float32, device=device)
+    y = torch.tensor([[0.25]], dtype=torch.float32, device=device)
     loss_fn = nn.MSELoss()
     optimizer = torch.optim.Adam(qnn_layer.parameters(), lr=learning_rate)
 
-    before_weights = qnn_layer.weight.detach().clone()
+    before_weights = qnn_layer.weight.detach().cpu().clone()
     pred_before = qnn_layer(x).view_as(y)
     loss_before = loss_fn(pred_before, y)
     optimizer.zero_grad()
     loss_before.backward()
     optimizer.step()
-    after_weights = qnn_layer.weight.detach().clone()
+    after_weights = qnn_layer.weight.detach().cpu().clone()
 
     with torch.no_grad():
         pred_after = qnn_layer(x).view_as(y)
@@ -770,8 +776,8 @@ def create_supervised_sequences(
 
 def prepare_financial_dataset(
     symbol: str = "AAPL",
-    start: str = "2018-01-01",
-    end: str | None = None,
+    start: str = "2022-01-01",
+    end: str | None= "2023-01-01",
     num_qubits: int = DEFAULT_NUM_QUBITS,
     window_size: int = 10,
     train_ratio: float = 0.8,
@@ -928,7 +934,7 @@ def evaluate_naive_previous_close(dataset: FinancialDataset) -> dict[str, object
 class LSTMRegressor(nn.Module):
     """Small reproducible PyTorch LSTM baseline for price regression."""
 
-    def __init__(self, input_size: int, hidden_size: int = 32, num_layers: int = 1):
+    def __init__(self, input_size: int, hidden_size: int = 100, num_layers: int = 5):
         super().__init__()
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers=num_layers, batch_first=True)
         self.head = nn.Linear(hidden_size, 1)
@@ -943,7 +949,8 @@ def train_lstm_baseline(
     epochs: int = 20,
     batch_size: int = 32,
     learning_rate: float = 1e-3,
-    hidden_size: int = 32,
+    hidden_size: int = 100,
+    num_layers: int = 5,
     seed: int = 42,
     val_ratio: float = 0.15,
     patience: int = 5,
@@ -954,7 +961,7 @@ def train_lstm_baseline(
 
     torch.manual_seed(seed)
     device = resolve_torch_device() if device is None else device
-    model = LSTMRegressor(input_size=dataset.train_seq_x.shape[-1], hidden_size=hidden_size).to(device)
+    model = LSTMRegressor(input_size=dataset.train_seq_x.shape[-1], hidden_size=hidden_size, num_layers=num_layers).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=2)
     loss_fn = nn.MSELoss()
@@ -976,7 +983,8 @@ def train_lstm_baseline(
     best_val = float("inf")
     patience_count = 0
     start_time = time.perf_counter()
-    for _ in range(epochs):
+    print(f"Training LSTM started for {epochs} epochs...")
+    for epoch in range(epochs):
         model.train()
         epoch_losses: list[float] = []
         for batch_x, batch_y in loader:
@@ -1000,6 +1008,7 @@ def train_lstm_baseline(
         train_losses.append(train_loss)
         losses.append(val_loss)
         scheduler.step(val_loss)
+        print(f"Epoch {epoch + 1}/{epochs} - Train loss: {train_loss:.4f} - Val loss: {val_loss:.4f}")
         if val_loss < best_val:
             best_val = val_loss
             best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
@@ -1007,6 +1016,7 @@ def train_lstm_baseline(
         else:
             patience_count += 1
             if patience_count >= patience:
+                print(f"Early stopping triggered after {epoch + 1} epochs.")
                 break
     training_time = time.perf_counter() - start_time
     if best_state is not None:
@@ -1042,14 +1052,16 @@ def train_standalone_qnn(
     val_ratio: float = 0.15,
     patience: int = 3,
     gradient_clip: float = 1.0,
+    device: torch.device | None = None,
 ) -> tuple[TorchConnector, dict[str, object]]:
-    """Train the custom circuit directly as a one-output QNN regressor."""
-
+    """Train the custom circuit directly as a one-output QNN regressor using GPU when available."""
     torch.manual_seed(seed)
     np.random.seed(seed)
+    if device is None:
+        device = resolve_torch_device()
     circuit, input_params, weight_params = build_custom_qnn_circuit(num_qubits=dataset.train_qnn_x.shape[1])
     qnn = create_estimator_qnn(circuit, input_params, weight_params, input_gradients=True)
-    model = create_torch_qnn_layer(qnn, seed=seed)
+    model = create_torch_qnn_layer(qnn, seed=seed, device=device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=1)
     loss_fn = nn.MSELoss()
@@ -1068,8 +1080,8 @@ def train_standalone_qnn(
         batch_size=batch_size,
         shuffle=False,
     )
-    val_x_t = torch.tensor(val_x, dtype=torch.float32)
-    val_y_t = torch.tensor(val_y, dtype=torch.float32)
+    val_x_t = torch.tensor(val_x, dtype=torch.float32, device=device)
+    val_y_t = torch.tensor(val_y, dtype=torch.float32, device=device)
 
     losses: list[float] = []
     train_losses: list[float] = []
@@ -1077,10 +1089,14 @@ def train_standalone_qnn(
     best_val = float("inf")
     patience_count = 0
     start_time = time.perf_counter()
-    for _ in range(epochs):
+    print(f"Training standalone QNN started for {epochs} epochs on {device}...")
+    model.train()
+    for epoch in range(epochs):
         model.train()
         epoch_losses: list[float] = []
         for batch_x, batch_y in loader:
+            batch_x = batch_x.to(device)
+            batch_y = batch_y.to(device)
             optimizer.zero_grad()
             pred = model(batch_x).view_as(batch_y)
             loss = loss_fn(pred, batch_y)
@@ -1099,6 +1115,7 @@ def train_standalone_qnn(
         train_losses.append(train_loss)
         losses.append(val_loss)
         scheduler.step(val_loss)
+        print(f"Epoch {epoch + 1}/{epochs} - Train loss: {train_loss:.4f} - Val loss: {val_loss:.4f}")
         if val_loss < best_val:
             best_val = val_loss
             best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
@@ -1106,6 +1123,7 @@ def train_standalone_qnn(
         else:
             patience_count += 1
             if patience_count >= patience:
+                print(f"Early stopping triggered after {epoch + 1} epochs.")
                 break
     training_time = time.perf_counter() - start_time
     if best_state is not None:
@@ -1114,7 +1132,7 @@ def train_standalone_qnn(
     model.eval()
     infer_start = time.perf_counter()
     with torch.no_grad():
-        pred_expectation = model(torch.tensor(dataset.test_qnn_x, dtype=torch.float32)).numpy()
+        pred_expectation = model(torch.tensor(dataset.test_qnn_x, dtype=torch.float32, device=device)).cpu().numpy()
     inference_time = time.perf_counter() - infer_start
     pred_scaled = expectation_to_scaled_target(pred_expectation)
     pred_price = inverse_target(dataset, pred_scaled)
@@ -1129,7 +1147,7 @@ def train_standalone_qnn(
         "Inference time": inference_time,
         "Parameter count": qnn.num_weights,
         "Circuit depth": circuit.depth(),
-        "Device": "cpu",
+        "Device": str(device),
     }
     return model, history
 
@@ -1160,18 +1178,21 @@ def build_hybrid_qnn1(
     qnn_input_dim: int = DEFAULT_NUM_QUBITS,
     hidden_size: int = 32,
     seed: int = 42,
+    device: torch.device | None = None,
 ) -> tuple[HybridQNN1, QuantumCircuit]:
-    """Create the HybridQNN1 model skeleton."""
-
+    """Create the HybridQNN1 model skeleton and place QNN layer on device."""
+    if device is None:
+        device = resolve_torch_device()
     circuit, input_params, weight_params = build_custom_qnn_circuit(num_qubits=qnn_input_dim)
     qnn = create_estimator_qnn(circuit, input_params, weight_params, input_gradients=True)
-    qnn_layer = create_torch_qnn_layer(qnn, seed=seed)
+    qnn_layer = create_torch_qnn_layer(qnn, seed=seed, device=device)
     model = HybridQNN1(
         qnn_layer=qnn_layer,
         qnn_input_dim=len(input_params),
         sequence_feature_dim=sequence_feature_dim,
         hidden_size=hidden_size,
     )
+    model.to(device)
     return model, circuit
 
 
@@ -1185,16 +1206,19 @@ def train_hybrid_qnn1(
     val_ratio: float = 0.15,
     patience: int = 3,
     gradient_clip: float = 1.0,
+    device: torch.device | None = None,
 ) -> tuple[HybridQNN1, dict[str, object]]:
-    """Train HybridQNN1: LSTM sequential processing plus QNN regression layer."""
-
+    """Train HybridQNN1: LSTM sequential processing plus QNN regression layer using GPU when available."""
     torch.manual_seed(seed)
     np.random.seed(seed)
+    if device is None:
+        device = resolve_torch_device()
     model, circuit = build_hybrid_qnn1(
         sequence_feature_dim=dataset.train_seq_x.shape[-1],
         qnn_input_dim=dataset.train_qnn_x.shape[1],
         hidden_size=hidden_size,
         seed=seed,
+        device=device,
     )
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=1)
@@ -1213,8 +1237,8 @@ def train_hybrid_qnn1(
         batch_size=batch_size,
         shuffle=False,
     )
-    val_x_t = torch.tensor(val_x, dtype=torch.float32)
-    val_y_t = torch.tensor(val_y, dtype=torch.float32)
+    val_x_t = torch.tensor(val_x, dtype=torch.float32, device=device)
+    val_y_t = torch.tensor(val_y, dtype=torch.float32, device=device)
 
     losses: list[float] = []
     train_losses: list[float] = []
@@ -1222,10 +1246,13 @@ def train_hybrid_qnn1(
     best_val = float("inf")
     patience_count = 0
     start_time = time.perf_counter()
-    for _ in range(epochs):
+    print(f"Training Hybrid QNN1 started for {epochs} epochs on {device}...")
+    for epoch in range(epochs):
         model.train()
         epoch_losses: list[float] = []
         for batch_x, batch_y in loader:
+            batch_x = batch_x.to(device)
+            batch_y = batch_y.to(device)
             optimizer.zero_grad()
             pred = model(batch_x).view_as(batch_y)
             loss = loss_fn(pred, batch_y)
@@ -1244,6 +1271,7 @@ def train_hybrid_qnn1(
         train_losses.append(train_loss)
         losses.append(val_loss)
         scheduler.step(val_loss)
+        print(f"Epoch {epoch + 1}/{epochs} - Train loss: {train_loss:.4f} - Val loss: {val_loss:.4f}")
         if val_loss < best_val:
             best_val = val_loss
             best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
@@ -1251,6 +1279,7 @@ def train_hybrid_qnn1(
         else:
             patience_count += 1
             if patience_count >= patience:
+                print(f"Early stopping triggered after {epoch + 1} epochs.")
                 break
     training_time = time.perf_counter() - start_time
     if best_state is not None:
@@ -1259,7 +1288,7 @@ def train_hybrid_qnn1(
     model.eval()
     infer_start = time.perf_counter()
     with torch.no_grad():
-        pred_expectation = model(torch.tensor(dataset.test_seq_x, dtype=torch.float32)).numpy()
+        pred_expectation = model(torch.tensor(dataset.test_seq_x, dtype=torch.float32, device=device)).cpu().numpy()
     inference_time = time.perf_counter() - infer_start
     pred_scaled = expectation_to_scaled_target(pred_expectation)
     pred_price = inverse_target(dataset, pred_scaled)
@@ -1274,7 +1303,7 @@ def train_hybrid_qnn1(
         "Inference time": inference_time,
         "Parameter count": count_torch_parameters(model),
         "Circuit depth": circuit.depth(),
-        "Device": "cpu",
+        "Device": str(device),
     }
     return model, history
 
@@ -1409,10 +1438,11 @@ def run_aapl_smoke_pipeline(
     )
     original_depth = build_original_custom_qnn_circuit().depth()
 
+    device = resolve_torch_device()
     naive = evaluate_naive_previous_close(dataset)
-    _, lstm_history = train_lstm_baseline(dataset, epochs=epochs_lstm)
-    _, qnn_history = train_standalone_qnn(dataset, epochs=epochs_qnn)
-    _, hybrid_history = train_hybrid_qnn1(dataset, epochs=epochs_hybrid)
+    _, lstm_history = train_lstm_baseline(dataset, epochs=epochs_lstm, device=device)
+    _, qnn_history = train_standalone_qnn(dataset, epochs=epochs_qnn, device=device)
+    _, hybrid_history = train_hybrid_qnn1(dataset, epochs=epochs_hybrid, device=device)
 
     histories = {
         "Classical LSTM": lstm_history,
@@ -1527,9 +1557,9 @@ def main() -> None:
     parser.add_argument("--dummy", action="store_true", help="Run a one-step dummy QNN training sanity test.")
     parser.add_argument("--aapl-smoke", action="store_true", help="Run a small AAPL smoke pipeline.")
     parser.add_argument("--full", action="store_true", help="Run the full AAPL regression pipeline.")
-    parser.add_argument("--epochs-lstm", type=int, default=3, help="Epochs for the AAPL smoke LSTM.")
-    parser.add_argument("--epochs-qnn", type=int, default=1, help="Epochs for the AAPL smoke standalone QNN.")
-    parser.add_argument("--epochs-hybrid", type=int, default=1, help="Epochs for the AAPL smoke HybridQNN1.")
+    parser.add_argument("--epochs-lstm", type=int, default=20, help="Epochs for the AAPL smoke LSTM.")
+    parser.add_argument("--epochs-qnn", type=int, default=20, help="Epochs for the AAPL smoke standalone QNN.")
+    parser.add_argument("--epochs-hybrid", type=int, default=20, help="Epochs for the AAPL smoke HybridQNN1.")
     parser.add_argument("--max-train-samples", type=int, default=32, help="Max training samples for smoke runs.")
     parser.add_argument("--max-test-samples", type=int, default=16, help="Max test samples for smoke runs.")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
@@ -1538,7 +1568,7 @@ def main() -> None:
     if args.verify:
         verify_architecture_unchanged(output_dir=args.output_dir, draw=True)
     if args.dummy:
-        run_dummy_sanity_test()
+        run_dummy_sanity_test(device=resolve_torch_device())
     if args.aapl_smoke:
         run_aapl_smoke_pipeline(
             output_dir=args.output_dir,
