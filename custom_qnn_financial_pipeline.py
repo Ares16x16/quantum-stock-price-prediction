@@ -1613,6 +1613,66 @@ def run_custom_qnn_model1_pipeline(
     return result_table
 
 
+def run_hybrid_qnn1_model2_pipeline(
+    output_dir: Path = Path("output/qnn_model2_ppr_aapl"),
+    epochs_hybrid: int = 20,
+    max_train_samples: int | None = None,
+    max_test_samples: int | None = None,
+) -> pd.DataFrame:
+    """Run only Model 2 / HybridQNN1 for AAPL."""
+
+    verify_architecture_unchanged(output_dir=output_dir, draw=True)
+    full_dataset = prepare_financial_dataset(symbol="AAPL", num_qubits=DEFAULT_NUM_QUBITS)
+    dataset = limit_dataset_samples(
+        full_dataset,
+        max_train_samples=max_train_samples,
+        max_test_samples=max_test_samples,
+    )
+    subset_label = "Full dataset" if not max_train_samples and not max_test_samples else "Subset"
+    note_prefix = "Full dataset." if subset_label == "Full dataset" else "Subset."
+    print(
+        f"HybridQNN1 Model 2 {subset_label}: "
+        f"train={len(dataset.train_y_scaled)} / {len(full_dataset.train_y_scaled)}, "
+        f"test={len(dataset.test_y_scaled)} / {len(full_dataset.test_y_scaled)}"
+    )
+
+    device = resolve_torch_device()
+    naive = evaluate_naive_previous_close(dataset)
+    original_depth = build_original_custom_qnn_circuit().depth()
+    _, hybrid_history = train_hybrid_qnn1(dataset, epochs=epochs_hybrid, device=device)
+
+    histories = {"HybridQNN1": hybrid_history}
+    save_training_log(histories, output_dir)
+    plot_loss_curve(hybrid_history["losses"], "HybridQNN1 loss", output_dir / "hybrid_qnn1_loss.png")
+    plot_actual_vs_predicted(
+        dataset.test_y_price,
+        hybrid_history["pred_price"],
+        "AAPL actual vs HybridQNN1 predicted",
+        output_dir / "hybrid_qnn1_actual_vs_predicted.png",
+    )
+
+    rows = [
+        make_result_row(
+            "Naive previous-close baseline",
+            dataset,
+            naive,
+            notes=f"{note_prefix} Predicts next close as previous close.",
+            circuit_depth="N/A",
+        ),
+        make_result_row(
+            "HybridQNN1",
+            dataset,
+            hybrid_history,
+            notes=f"{note_prefix} LSTM feature extractor with trainable Pauli Product Rotation QNN layer.",
+            circuit_depth=original_depth,
+        ),
+    ]
+    result_table = pd.DataFrame(rows, columns=RESULT_COLUMNS)
+    result_table.to_csv(output_dir / "result_table.csv", index=False)
+    print(result_table)
+    return result_table
+
+
 def teammate_update_text() -> str:
     """Short explanation suitable for teammates."""
 
@@ -1633,6 +1693,7 @@ def main() -> None:
     parser.add_argument("--aapl-smoke", action="store_true", help="Run a small AAPL smoke pipeline.")
     parser.add_argument("--full", action="store_true", help="Run the full AAPL regression pipeline.")
     parser.add_argument("--custom-qnn-only", action="store_true", help="Run only Model 1 / standalone CustomQNN.")
+    parser.add_argument("--hybrid-qnn1-only", action="store_true", help="Run only Model 2 / HybridQNN1.")
     parser.add_argument("--epochs-lstm", type=int, default=20, help="Epochs for the AAPL smoke LSTM.")
     parser.add_argument("--epochs-qnn", type=int, default=20, help="Epochs for the AAPL smoke standalone QNN.")
     parser.add_argument("--epochs-hybrid", type=int, default=20, help="Epochs for the AAPL smoke HybridQNN1.")
@@ -1670,7 +1731,23 @@ def main() -> None:
             max_train_samples=model1_max_train,
             max_test_samples=model1_max_test,
         )
-    if not (args.verify or args.dummy or args.aapl_smoke or args.full or args.custom_qnn_only):
+    if args.hybrid_qnn1_only:
+        model2_max_train = None if args.max_train_samples <= 0 else args.max_train_samples
+        model2_max_test = None if args.max_test_samples <= 0 else args.max_test_samples
+        run_hybrid_qnn1_model2_pipeline(
+            output_dir=args.output_dir,
+            epochs_hybrid=args.epochs_hybrid,
+            max_train_samples=model2_max_train,
+            max_test_samples=model2_max_test,
+        )
+    if not (
+        args.verify
+        or args.dummy
+        or args.aapl_smoke
+        or args.full
+        or args.custom_qnn_only
+        or args.hybrid_qnn1_only
+    ):
         parser.print_help()
 
 
