@@ -54,8 +54,9 @@ try:
     import pandas as pd
     import torch
     from qiskit import QuantumCircuit
-    from qiskit.circuit import Gate, Parameter, ParameterVector
-    from qiskit.quantum_info import SparsePauliOp
+    from qiskit.circuit import Parameter, ParameterVector
+    from qiskit.circuit.library import PauliProductRotationGate
+    from qiskit.quantum_info import Pauli, SparsePauliOp
     from qiskit_machine_learning.connectors import TorchConnector
     from qiskit_machine_learning.neural_networks import EstimatorQNN
     from sklearn.decomposition import PCA
@@ -198,17 +199,16 @@ def compute_angle_encoding(
     return theta, phi
 
 
-def ppr_gate(width: int) -> Gate:
-    """Return the custom Ppr(0) block used in the reproduced circuit.
+def ppr_gate(width: int, angle: float | Parameter = 0) -> PauliProductRotationGate:
+    """Return a Pauli Product Rotation block for the paper's ``Ppr`` gates.
 
-    The paper/source circuit does not define the Ppr unitary separately. The
-    existing project treats it as a labelled identity block so the transcribed
-    architecture remains drawable and executable.
+    The circuit drawing labels these blocks as ``Ppr(0)``. We model them with
+    Qiskit's generic Pauli product rotation gate and use a Z-product as the
+    default Pauli string. The original circuit keeps the angle at zero; the
+    trainable circuit exposes the same positions as learnable angles.
     """
 
-    gate = Gate(name="Ppr", num_qubits=width, params=[0])
-    gate.definition = QuantumCircuit(width)
-    return gate
+    return PauliProductRotationGate(Pauli("Z" * width), angle=angle, label="Ppr")
 
 
 def build_original_angle_encoding_circuit(
@@ -270,6 +270,21 @@ def _append_rotation(
     getattr(circuit, axis)(angle, qubit)
 
 
+def _append_ppr(
+    circuit: QuantumCircuit,
+    qubits: Sequence[int],
+    weight_params: list[Parameter] | None,
+) -> None:
+    """Append a fixed or trainable Pauli Product Rotation block."""
+
+    if weight_params is None:
+        angle: float | Parameter = 0
+    else:
+        angle = Parameter(f"theta_{len(weight_params):03d}_ppr_w{len(qubits)}")
+        weight_params.append(angle)
+    circuit.append(ppr_gate(len(qubits), angle), list(qubits))
+
+
 def build_original_qnn_regressor_circuit(
     num_qubits: int = DEFAULT_NUM_QUBITS,
 ) -> QuantumCircuit:
@@ -324,7 +339,7 @@ def _build_qnn_regressor_circuit(
     circuit.cx(2, 3)
     rot("rz", 1)
     rot("rz", 3)
-    circuit.append(ppr_gate(2), [0, 1])
+    _append_ppr(circuit, [0, 1], weights)
     circuit.cx(2, 3)
     rot("rx", 1)
     rot("ry", 2)
@@ -332,21 +347,21 @@ def _build_qnn_regressor_circuit(
     rot("rz", 1)
     rot("rz", 2)
     rot("rz", 3)
-    circuit.append(ppr_gate(2), [1, 2])
+    _append_ppr(circuit, [1, 2], weights)
     rot("rx", 2)
     rot("rz", 2)
-    circuit.append(ppr_gate(2), [2, 3])
+    _append_ppr(circuit, [2, 3], weights)
     rot("ry", 2)
     rot("ry", 2)
     rot("rx", 3)
     rot("rz", 3)
-    circuit.append(ppr_gate(2), [3, 4])
+    _append_ppr(circuit, [3, 4], weights)
     rot("rz", 2)
     rot("rz", 2)
     rot("rx", 4)
     rot("rz", 4)
     circuit.cx(2, 3)
-    circuit.append(ppr_gate(5), [0, 1, 2, 3, 4])
+    _append_ppr(circuit, [0, 1, 2, 3, 4], weights)
     rot("ry", 0)
     rot("ry", 3)
     rot("ry", 4)
@@ -1538,6 +1553,66 @@ def run_aapl_full_pipeline(
     )
 
 
+def run_custom_qnn_model1_pipeline(
+    output_dir: Path = Path("output/qnn_model1_ppr_aapl"),
+    epochs_qnn: int = 20,
+    max_train_samples: int | None = None,
+    max_test_samples: int | None = None,
+) -> pd.DataFrame:
+    """Run only Model 1 / standalone CustomQNN for AAPL."""
+
+    verify_architecture_unchanged(output_dir=output_dir, draw=True)
+    full_dataset = prepare_financial_dataset(symbol="AAPL", num_qubits=DEFAULT_NUM_QUBITS)
+    dataset = limit_dataset_samples(
+        full_dataset,
+        max_train_samples=max_train_samples,
+        max_test_samples=max_test_samples,
+    )
+    subset_label = "Full dataset" if not max_train_samples and not max_test_samples else "Subset"
+    note_prefix = "Full dataset." if subset_label == "Full dataset" else "Subset."
+    print(
+        f"CustomQNN Model 1 {subset_label}: "
+        f"train={len(dataset.train_y_scaled)} / {len(full_dataset.train_y_scaled)}, "
+        f"test={len(dataset.test_y_scaled)} / {len(full_dataset.test_y_scaled)}"
+    )
+
+    device = resolve_torch_device()
+    naive = evaluate_naive_previous_close(dataset)
+    original_depth = build_original_custom_qnn_circuit().depth()
+    _, qnn_history = train_standalone_qnn(dataset, epochs=epochs_qnn, device=device)
+
+    histories = {"Standalone CustomQNN": qnn_history}
+    save_training_log(histories, output_dir)
+    plot_loss_curve(qnn_history["losses"], "Standalone CustomQNN loss", output_dir / "custom_qnn_loss.png")
+    plot_actual_vs_predicted(
+        dataset.test_y_price,
+        qnn_history["pred_price"],
+        "AAPL actual vs Standalone CustomQNN predicted",
+        output_dir / "custom_qnn_actual_vs_predicted.png",
+    )
+
+    rows = [
+        make_result_row(
+            "Naive previous-close baseline",
+            dataset,
+            naive,
+            notes=f"{note_prefix} Predicts next close as previous close.",
+            circuit_depth="N/A",
+        ),
+        make_result_row(
+            "Standalone CustomQNN",
+            dataset,
+            qnn_history,
+            notes=f"{note_prefix} Pauli Product Rotation gates included as trainable Model 1 circuit weights.",
+            circuit_depth=original_depth,
+        ),
+    ]
+    result_table = pd.DataFrame(rows, columns=RESULT_COLUMNS)
+    result_table.to_csv(output_dir / "result_table.csv", index=False)
+    print(result_table)
+    return result_table
+
+
 def teammate_update_text() -> str:
     """Short explanation suitable for teammates."""
 
@@ -1557,6 +1632,7 @@ def main() -> None:
     parser.add_argument("--dummy", action="store_true", help="Run a one-step dummy QNN training sanity test.")
     parser.add_argument("--aapl-smoke", action="store_true", help="Run a small AAPL smoke pipeline.")
     parser.add_argument("--full", action="store_true", help="Run the full AAPL regression pipeline.")
+    parser.add_argument("--custom-qnn-only", action="store_true", help="Run only Model 1 / standalone CustomQNN.")
     parser.add_argument("--epochs-lstm", type=int, default=20, help="Epochs for the AAPL smoke LSTM.")
     parser.add_argument("--epochs-qnn", type=int, default=20, help="Epochs for the AAPL smoke standalone QNN.")
     parser.add_argument("--epochs-hybrid", type=int, default=20, help="Epochs for the AAPL smoke HybridQNN1.")
@@ -1585,7 +1661,16 @@ def main() -> None:
             epochs_qnn=args.epochs_qnn,
             epochs_hybrid=args.epochs_hybrid,
         )
-    if not (args.verify or args.dummy or args.aapl_smoke or args.full):
+    if args.custom_qnn_only:
+        model1_max_train = None if args.max_train_samples <= 0 else args.max_train_samples
+        model1_max_test = None if args.max_test_samples <= 0 else args.max_test_samples
+        run_custom_qnn_model1_pipeline(
+            output_dir=args.output_dir,
+            epochs_qnn=args.epochs_qnn,
+            max_train_samples=model1_max_train,
+            max_test_samples=model1_max_test,
+        )
+    if not (args.verify or args.dummy or args.aapl_smoke or args.full or args.custom_qnn_only):
         parser.print_help()
 
 

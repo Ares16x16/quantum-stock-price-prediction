@@ -1,0 +1,3 @@
+Model name,Dataset / asset,Number of qubits,VQC layers,Feature set,RMSE,MAE,Directional Accuracy,Training time,Inference time,Parameter count,Circuit depth,Notes
+Naive previous-close baseline,AAPL,5,1,"Open, High, Low, Close, SMA5",3.365549348425456,2.526693344116211,0.0,0.0,1.1699999959091656e-05,0,N/A,Full dataset. Predicts next close as previous close.
+Standalone CustomQNN,AAPL,5,1,"Open, High, Low, Close, SMA5",4.697264609862156,3.9131979942321777,0.4186046511627907,1406.8148115000004,0.18143679999957385,49,33,Full dataset. Pauli Product Rotation gates included as trainable Model 1 circuit weights.

@@ -15,4 +15,4 @@ def test_custom_qnn_architecture_unchanged():
     assert dict(original.count_ops()) == dict(refactored.count_ops())
     assert original.depth() == refactored.depth() == 33
     assert len(input_params) == 5
-    assert len(weight_params) == 44
+    assert len(weight_params) == 49

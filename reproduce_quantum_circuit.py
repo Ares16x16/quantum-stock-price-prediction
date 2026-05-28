@@ -11,7 +11,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import fitz
 from qiskit import QuantumCircuit
-from qiskit.circuit import Gate
+from qiskit.circuit.library import PauliProductRotationGate
+from qiskit.quantum_info import Pauli
 from qiskit.quantum_info import Statevector
 
 DEFAULT_NUM_QUBITS = 5
@@ -44,13 +45,10 @@ def build_angle_encoding_circuit(num_qubits: int = DEFAULT_NUM_QUBITS) -> Quantu
     return circuit
 
 
-def ppr_gate(width: int) -> Gate:
-    """Return the custom `Ppr(0)` gate shown in the paper's circuit."""
+def ppr_gate(width: int) -> PauliProductRotationGate:
+    """Return the Pauli Product Rotation block shown as `Ppr(0)`."""
 
-    gate = Gate(name="Ppr", num_qubits=width, params=[0])
-    # The paper does not define Ppr separately. Treat it as an opaque labeled identity block so the reproduced circuit can still be simulated.
-    gate.definition = QuantumCircuit(width)
-    return gate
+    return PauliProductRotationGate(Pauli("Z" * width), angle=0, label="Ppr")
 
 
 def build_custom_qnn_ansatz_circuit(num_qubits: int = DEFAULT_NUM_QUBITS) -> QuantumCircuit:
@@ -59,8 +57,8 @@ def build_custom_qnn_ansatz_circuit(num_qubits: int = DEFAULT_NUM_QUBITS) -> Qua
     Reference parts:
     - `arxiv_source/fig5.pdf` supplies the exact visible gate order.
     - The CNOT pairs come from the blue control/target vector geometry.
-    - `Ppr(0)` is implemented as a labeled identity block because the paper
-      does not separately define the Ppr unitary.
+    - `Ppr(0)` is implemented with Qiskit's Pauli Product Rotation gate using
+      a zero angle and a Z-product Pauli string.
     """
 
     if num_qubits != DEFAULT_NUM_QUBITS:
