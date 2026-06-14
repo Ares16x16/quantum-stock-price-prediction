@@ -1044,11 +1044,13 @@ def train_lstm_baseline(
     inference_time = time.perf_counter() - infer_start
     pred_price = inverse_target(dataset, pred_scaled)
     metrics = regression_metrics(dataset.test_y_price, pred_price, dataset.test_prev_close)
+    test_loss = loss_fn(torch.tensor(pred_price, dtype=torch.float32), torch.tensor(dataset.test_y_price, dtype=torch.float32)).item()
 
     history = {
         **metrics,
         "losses": losses,
         "train_losses": train_losses,
+        "test_loss": test_loss,
         "pred_price": pred_price,
         "Training time": training_time,
         "Inference time": inference_time,
@@ -1152,11 +1154,13 @@ def train_standalone_qnn(
     pred_scaled = expectation_to_scaled_target(pred_expectation)
     pred_price = inverse_target(dataset, pred_scaled)
     metrics = regression_metrics(dataset.test_y_price, pred_price, dataset.test_prev_close)
+    test_loss = float(loss_fn(torch.tensor(pred_expectation, dtype=torch.float32), torch.tensor(scaled_target_to_expectation(dataset.test_y_scaled), dtype=torch.float32)).item())
 
     history = {
         **metrics,
         "losses": losses,
         "train_losses": train_losses,
+        "test_loss": test_loss,
         "pred_price": pred_price,
         "Training time": training_time,
         "Inference time": inference_time,
@@ -1308,11 +1312,13 @@ def train_hybrid_qnn1(
     pred_scaled = expectation_to_scaled_target(pred_expectation)
     pred_price = inverse_target(dataset, pred_scaled)
     metrics = regression_metrics(dataset.test_y_price, pred_price, dataset.test_prev_close)
+    test_loss = loss_fn(torch.tensor(pred_price, dtype=torch.float32, device=device), torch.tensor(dataset.test_y_price, dtype=torch.float32, device=device))
 
     history = {
         **metrics,
         "losses": losses,
         "train_losses": train_losses,
+        "test_loss": test_loss,
         "pred_price": pred_price,
         "Training time": training_time,
         "Inference time": inference_time,
@@ -1379,6 +1385,7 @@ def save_training_log(
             losses = history.get("losses", [])
             row[name] = losses[epoch] if epoch < len(losses) else np.nan
         rows.append(row)
+    rows.append({"epoch": "Test", **{name: history.get("test_loss", np.nan) for name, history in histories.items()}})
     path = output_dir / "training_log.csv"
     pd.DataFrame(rows).to_csv(path, index=False)
     return path
