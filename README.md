@@ -24,6 +24,7 @@ It also includes:
 - a preserved Qiskit circuit reproduction;
 - a trainable `EstimatorQNN` pipeline;
 - classical LSTM and naive baselines;
+- the four-stock bidirectional up/down prediction track using reused ANN, QQBN, and QQTN models;
 - a separate GPU-friendly sequence hybrid experiment;
 - saved experiment artifacts under `output/`;
 - a Streamlit dashboard for result review and lightweight interaction.
@@ -33,8 +34,9 @@ It also includes:
 - The HQNN-FSP circuit has been reproduced in Qiskit and wrapped into a trainable `EstimatorQNN` without changing the gate sequence.
 - The ContextualQNN path runs locally on live `yfinance` data and supports single-asset and two-asset QMTL experiments.
 - The qubit/qutrit paper path runs locally as ANN, QQBN, and QQTN direction-classification experiments.
-- The repository also includes a separate `BiLSTM-QQTN` experiment for stronger GPU-friendly local hybrid testing.
-- The Streamlit dashboard works locally and now uses live `yfinance` downloads again.
+- The bidirectional direction track now benchmarks AAPL, MSFT, GOOGL, and NVDA using the reused ANN/QQBN/QQTN model family, richer lagged features, train-only scaling, and validation-calibrated thresholds.
+- The repository also includes a separate optional `BiLSTM-QQTN` experiment for stronger GPU-friendly local hybrid testing.
+- The Streamlit dashboard is organized by paper/model track, with the bidirectional direction work and the optional BiLSTM extension on separate tabs.
 - The full CustomQNN and HybridQNN1 regression paths still underperform the naive previous-close baseline and their prediction curves remain near-flat under limited simulator training.
 
 ## Repository Layout
@@ -45,9 +47,11 @@ It also includes:
 |   `-- streamlit_app.py
 |-- docs/
 |   |-- local_testing_guide.md
+|   |-- bidirectional_direction_prediction.md
 |   |-- paper_queue.md
 |   `-- progress_log.md
 |-- output/
+|   |-- bidirectional_direction/
 |   |-- contextual_qnn/
 |   |-- contextual_qnn_multilevel/
 |   |-- qnn_diagnostic_aapl/
@@ -133,7 +137,14 @@ This performs:
 - ContextualQNN two-asset QMTL run;
 - ANN / QQBN / QQTN AAPL run.
 
-For the stronger GPU-friendly hybrid experiment:
+For the four-stock bidirectional up/down prediction track:
+
+```powershell
+$env:PYTHONPATH='src;.'
+.\.venv\Scripts\python.exe -m qsp.experiments.run_bidirectional_direction --symbols AAPL MSFT GOOGL NVDA --epochs 120 --max-rows 1200 --output-dir output\bidirectional_direction
+```
+
+For the optional stronger GPU-friendly sequence hybrid experiment:
 
 ```powershell
 $env:PYTHONPATH='src;.'
@@ -157,15 +168,15 @@ http://localhost:8501
 
 The Streamlit dashboard includes:
 
-- **Model Comparison**: saved headline result table for the HQNN-FSP regression benchmark;
-- **All Results**: consolidated saved outputs from the three paper tracks;
-- **Circuit Viewer**: original and trainable Qiskit circuit diagrams;
-- **Interactive Prediction**: ticker selector plus lightweight ContextualQNN direction prediction;
-- **Advanced ContextualQNN**: higher-resolution `d=4` return-bucket prediction on a separate tab;
-- **Experiment Lab**: saved GPU-friendly sequence hybrid results with a qutrit-inspired head;
-- **Saved AAPL Results**: plots for LSTM, CustomQNN, and HybridQNN1;
-- **Paper Tracker**: plain-language project progress and paper coverage notes;
-- **Docs & Links**: direct paths to the repository notes.
+- **Overview**: project map and grouped saved-result history;
+- **HQNN-FSP**: CustomQNN/HybridQNN1 regression results, circuit diagrams, and saved AAPL plots;
+- **ContextualQNN**: binary ContextualQNN, QMTL, and `d=4` return-regime artifacts;
+- **QQBN / QQTN**: interim ANN, QQBN, and QQTN direction-classification artifacts;
+- **Bidirectional Direction**: the dedicated four-stock up/down benchmark, plots, thresholds, prediction rows, and next-step notes;
+- **BiLSTM Extension**: fourth-paper sequence-learning extension kept separate from the first implementation;
+- **Interactive Demos**: lightweight binary and `d=4` ContextualQNN demos;
+- **Paper Tracker**: progress notes and paper coverage;
+- **Docs & Runbook**: commands, local document paths, and external references.
 
 ### How to use the interactive prediction page
 
@@ -190,13 +201,14 @@ The dashboard will:
 
 This page uses density-based return buckets with `d=4`, context length `T=2`, and a lightweight statevector model. It predicts the next return regime rather than the exact next close, and it shows the full bucket probability distribution.
 
-### How to use the experiment lab
+### How to use the bidirectional direction page
 
-1. Open the **Experiment Lab** tab.
-2. Review the saved AAPL result table for the stronger local hybrid experiment.
-3. Switch between the `BiLSTM baseline` and `BiLSTM-QQTN hybrid` plots.
+1. Open the **Bidirectional Direction** tab.
+2. Review the saved `ANN`, `QQBN`, and `QQTN` bidirectional direction table.
+3. Select a stock and model to view probability-up and confusion-matrix plots.
+4. Use the **BiLSTM Extension** tab only as a later extension, not as the first deliverable.
 
-This tab shows saved artifacts rather than live browser-side training. The plotted curve is an implied next-close path derived from direction probabilities, so it looks richer than the preserved Qiskit regression curves while still remaining separate from the preserved HQNN-FSP circuit.
+This tab shows saved artifacts rather than live browser-side training. The primary plots show the probability of an up move and the holdout confusion matrix for each stock/model pair. The ensemble row is included as a comparison attempt, but the main model remains QQTN.
 
 If `yfinance` is unavailable, the dashboard falls back to deterministic sample data and labels that result clearly.
 
@@ -302,9 +314,47 @@ Model interpretation:
 - `QQBN`: qubit-inspired two-state feature expansion;
 - `QQTN`: qutrit-inspired three-state feature expansion.
 
-### 4. Sequence Hybrid Extension
+### 4. Bidirectional Direction Prediction
+
+Run the four-stock up/down prediction benchmark:
+
+```powershell
+$env:PYTHONPATH='src;.'
+.\.venv\Scripts\python.exe -m qsp.experiments.run_bidirectional_direction --symbols AAPL MSFT GOOGL NVDA --epochs 120 --max-rows 1200 --output-dir output\bidirectional_direction
+```
+
+Training method:
+
+- target is next-day direction: `Next_Return > 0`;
+- benchmark assets are `AAPL`, `MSFT`, `GOOGL`, and `NVDA`;
+- models reuse the interim `ANN`, `QQBN`, and `QQTN` classifiers;
+- features add rolling volatility, momentum, SMA ratios, MACD signal/histogram, and volume changes on top of the existing technical indicators;
+- scaling is fit on the training split only;
+- each stock uses a time-ordered train/validation/test split;
+- neural models use validation-calibrated probability thresholds instead of a fixed `0.5`.
+- an `ANN+QQBN+QQTN ensemble` row is saved as a comparison attempt, but it does not beat the main QQTN row on the current four-stock average.
+- tuned defaults are `hidden_dim=48` and `learning_rate=0.003`, selected from a small local sweep across the reused model family.
+
+Saved artifacts are written to `output/bidirectional_direction/`, including per-stock predictions, thresholds, training logs, probability plots, confusion matrices, and a combined result table.
+
+Presentation reference:
+`docs/bidirectional_direction_prediction.md`
+
+Current saved four-stock average:
+
+- `QQTN`: `Directional Accuracy 0.5236`, `F1 0.6789`, `Sharpe Ratio 0.9538`
+- `QQTN balanced threshold`: `Directional Accuracy 0.5236`, `F1 0.6275`, `Balanced Accuracy 0.5166`
+- `ANN+QQBN+QQTN ensemble`: `Directional Accuracy 0.5111`, `F1 0.6756`
+- `Majority baseline`: `Directional Accuracy 0.5111`, `F1 0.6761`
+- `Momentum baseline`: `Directional Accuracy 0.5028`, `F1 0.5123`
+
+This is a modest direction-classification improvement, not a claim that the forecasting problem is solved.
+
+### 5. Sequence Hybrid Extension
 
 This is a repository extension rather than an exact paper reproduction. Its purpose is practical: to test whether a stronger temporal encoder combined with a quantum-inspired head can produce a better local hybrid artifact on GPU without modifying the preserved HQNN-FSP circuit.
+
+This is not the first bidirectional deliverable. It remains an optional later extension because the interim presentation did not include BiLSTM as the main model.
 
 Run it with:
 
@@ -332,6 +382,8 @@ Current saved AAPL result:
   higher-resolution `d=4` ContextualQNN artifacts
 - `output/quantum_inspired/`
   ANN / QQBN / QQTN result tables and loss curves
+- `output/bidirectional_direction/`
+  four-stock up/down prediction tables, row-level predictions, thresholds, probability plots, and confusion matrices
 - `output/sequence_hybrid_aapl/`
   GPU-friendly sequence hybrid result table, loss curves, and implied price plots
 
@@ -355,6 +407,7 @@ Practical on a normal laptop:
 - ContextualQNN AAPL run;
 - ContextualQNN two-asset QMTL run;
 - ANN / QQBN / QQTN live-data run;
+- the bidirectional direction four-stock run;
 - GPU-friendly `BiLSTM-QQTN` sequence hybrid run;
 - diagnostic CustomQNN plots on smaller subsets.
 
@@ -400,6 +453,7 @@ $env:PYTHONPATH='src;.'
 
 - [Project Progress](D:\coding_workspace\master%20capstone\quantum-stock-price-prediction\docs\progress_log.md)
 - [Paper Coverage](D:\coding_workspace\master%20capstone\quantum-stock-price-prediction\docs\paper_queue.md)
+- [ the Bidirectional Direction Prediction](D:\coding_workspace\master%20capstone\quantum-stock-price-prediction\docs\bidirectional_direction_prediction.md)
 - [Local Testing Guide](D:\coding_workspace\master%20capstone\quantum-stock-price-prediction\docs\local_testing_guide.md)
 - [Related Papers](D:\coding_workspace\master%20capstone\quantum-stock-price-prediction\docs\related_papers.md)
 

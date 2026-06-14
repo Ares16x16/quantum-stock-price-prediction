@@ -61,6 +61,52 @@ The third implementation track follows *Quantum Inspired Qubit Qutrit Neural Net
 
 These models use normalized technical indicators, an 80/20 time-ordered split, Adam, and binary cross-entropy loss. The QQBN path encodes each feature into a two-state qubit-inspired representation, while QQTN uses a three-state qutrit-inspired representation before the trainable feed-forward layers. The current saved AAPL run uses live yfinance data. A later GPU-backed training refactor improved speed and made device usage explicit, but it did not consistently beat the earlier best QQTN accuracy on AAPL, so the original saved QQTN row remains the stronger benchmark in this repository.
 
+## Bidirectional Direction Track
+
+The next implementation step is now a dedicated bidirectional up/down prediction track. In this track, "bidirectional" means next-day price direction:
+
+```text
+Target = 1 if Close[t + 1] > Close[t], otherwise 0
+```
+
+This track intentionally reuses the interim `ANN`, `QQBN`, and `QQTN` models instead of making BiLSTM the first model. The direct reference is the qubit/qutrit paper, with the ContextualQNN paper supporting the binary future-return framing and the HQNN-FSP paper motivating stronger technical-indicator feature engineering.
+
+Implementation file:
+`src/qsp/experiments/run_bidirectional_direction.py`
+
+Presentation reference:
+`docs/bidirectional_direction_prediction.md`
+
+The new experiment benchmarks `AAPL`, `MSFT`, `GOOGL`, and `NVDA`. Compared with the previous `run_quantum_inspired` AAPL-only run, it adds:
+
+- a four-stock benchmark;
+- richer lagged features, rolling volatility, momentum, SMA ratios, MACD signal/histogram, and volume features;
+- train-only feature scaling;
+- explicit time-ordered train/validation/test splits;
+- validation-calibrated probability thresholds;
+- calibrated `ANN+QQBN+QQTN` ensemble comparison rows;
+- majority-class and momentum baselines;
+- row-level prediction CSVs, threshold logs, probability plots, and confusion matrices.
+
+Saved outputs are stored in `output/bidirectional_direction`.
+
+Current saved four-stock average:
+
+| Model | Directional Accuracy | Precision | Recall | F1 | Balanced Accuracy | Sharpe Ratio |
+|---|---:|---:|---:|---:|---:|---:|
+| Majority baseline | 0.5111 | 0.5111 | 1.0000 | 0.6761 | 0.5000 | 0.6380 |
+| Momentum baseline | 0.5028 | 0.5136 | 0.5110 | 0.5123 | 0.5015 | 0.0170 |
+| ANN | 0.5097 | 0.5106 | 0.9813 | 0.6713 | 0.4991 | 0.5457 |
+| QQBN | 0.5111 | 0.5111 | 1.0000 | 0.6761 | 0.5000 | 0.6380 |
+| QQTN | 0.5236 | 0.5182 | 0.9866 | 0.6789 | 0.5134 | 0.9538 |
+| QQTN balanced threshold | 0.5236 | 0.5222 | 0.8480 | 0.6275 | 0.5166 | 0.2241 |
+| ANN+QQBN+QQTN ensemble | 0.5111 | 0.5112 | 0.9974 | 0.6756 | 0.5002 | 0.6160 |
+| ANN+QQBN+QQTN balanced ensemble | 0.4972 | 0.3792 | 0.7500 | 0.5034 | 0.5000 | 0.2643 |
+
+The QQTN row is the main result. It gives a modest average directional-accuracy improvement over both baselines while staying within the already-present qubit/qutrit model family. The `QQTN balanced threshold` row uses the same trained QQTN probabilities but selects the threshold by validation balanced accuracy, improving balanced accuracy and reducing one-sided up predictions.
+
+The ensemble rows were added as a lightweight improvement attempt over the reused interim family. They do not beat QQTN on the current four-stock average, so they are retained as comparison evidence rather than promoted as the main result.
+
 ## Sequence Hybrid Experiment
 
 To explore a stronger local model without changing the preserved HQNN-FSP circuit, the repository now includes a separate GPU-friendly sequence hybrid path. This experiment uses a bidirectional LSTM encoder with attention pooling and compares:
@@ -77,6 +123,5 @@ The current AAPL run is stored in `output/sequence_hybrid_aapl`. It predicts nex
 
 This path does not claim an exact paper reproduction. Its role is different: it is a local experimental extension that combines a stronger temporal encoder with a quantum-inspired head so the dashboard can show a richer non-flat prediction curve under GPU-friendly training.
 
-## Demo Status
+This sequence path is not the first bidirectional deliverable because the interim presentation did not introduce BiLSTM as the main model. It remains available as an optional later extension.
 
-The Streamlit dashboard loads saved artifacts, renders circuit diagrams, compares model result tables, and runs two lightweight live demos after a ticker is selected: the binary ContextualQNN direction model and the higher-resolution `d=4` ContextualQNN regime model. It does not train the expensive CustomQNN inside the web interface.

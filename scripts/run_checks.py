@@ -95,6 +95,7 @@ def check_web_demo_helpers() -> None:
 
 def check_quantum_inspired_models() -> None:
     import numpy as np
+    import torch
 
     from qsp.models.quantum_inspired import (
         QQBNClassifier,
@@ -113,9 +114,10 @@ def check_quantum_inspired_models() -> None:
         dtype=float,
     )
     train_y = np.asarray([0, 0, 1, 1], dtype=int)
+    device = torch.device("cpu")
     for model in [QQBNClassifier(3), QQTNClassifier(3)]:
-        history = train_binary_classifier(model, train_x, train_y, epochs=1)
-        pred, proba = predict_binary_classifier(model, train_x)
+        history = train_binary_classifier(model, train_x, train_y, epochs=1, device=device)
+        pred, proba = predict_binary_classifier(model, train_x, device=device)
         assert len(history.losses) == 1
         assert pred.shape == train_y.shape
         assert ((0.0 <= proba) & (proba <= 1.0)).all()
@@ -123,6 +125,8 @@ def check_quantum_inspired_models() -> None:
 
 
 def check_sequence_hybrids() -> None:
+    import torch
+
     from qsp.models.sequence_hybrids import (
         BidirectionalLSTMBaseline,
         TemporalQQTNHybrid,
@@ -132,13 +136,49 @@ def check_sequence_hybrids() -> None:
 
     train_x = np.random.default_rng(42).random((16, 6, 4), dtype=np.float32)
     train_y = np.asarray([0, 1] * 8, dtype=int)
+    device = torch.device("cpu")
     for model in [BidirectionalLSTMBaseline(4, hidden_dim=16), TemporalQQTNHybrid(4, hidden_dim=16, qutrit_dim=8)]:
-        history = train_sequence_classifier(model, train_x, train_y, epochs=1)
-        pred, proba = predict_sequence_classifier(model, train_x)
+        history = train_sequence_classifier(model, train_x, train_y, epochs=1, device=device)
+        pred, proba = predict_sequence_classifier(model, train_x, device=device)
         assert len(history.losses) == 1
         assert pred.shape == train_y.shape
         assert ((0.0 <= proba) & (proba <= 1.0)).all()
     print("Sequence hybrid checks OK")
+
+
+def check_bidirectional_direction_helpers() -> None:
+    import pandas as pd
+
+    from qsp.experiments.run_bidirectional_direction import (
+        add_bidirectional_direction_features,
+        calibrate_probability_threshold,
+        prepare_bidirectional_direction_dataset,
+    )
+
+    dates = np.arange(90)
+    close = 100.0 + 0.08 * dates + 2.0 * np.sin(dates / 4.0)
+    frame = pd.DataFrame(
+        {
+            "Open": close * 0.999,
+            "High": close * 1.01,
+            "Low": close * 0.99,
+            "Close": close,
+            "Volume": 1_000_000 + 1000 * dates,
+        },
+        index=pd.bdate_range("2023-01-02", periods=len(dates)),
+    )
+    engineered = add_bidirectional_direction_features(frame)
+    assert {"Target", "Next_Return", "Volatility_20", "MACD_Signal"}.issubset(engineered.columns)
+    dataset = prepare_bidirectional_direction_dataset("AAPL", frame=frame, max_rows=70)
+    assert len(dataset.train_x) > 0
+    assert len(dataset.val_x) > 0
+    assert len(dataset.test_x) > 0
+    calibration = calibrate_probability_threshold(
+        np.asarray([0, 0, 1, 1]),
+        np.asarray([0.2, 0.4, 0.7, 0.9]),
+    )
+    assert 0.3 <= calibration.threshold <= 0.7
+    print("Bidirectional direction helper checks OK")
 
 
 def check_custom_qnn_architecture() -> None:
@@ -160,6 +200,7 @@ def main() -> None:
     check_web_demo_helpers()
     check_quantum_inspired_models()
     check_sequence_hybrids()
+    check_bidirectional_direction_helpers()
     check_custom_qnn_architecture()
     print("All lightweight checks passed")
 

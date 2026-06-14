@@ -1,12 +1,13 @@
 # Paper Coverage
 
-The project currently tracks three papers. Each paper has a separate implementation role so that the repository remains clear and easy to explain during the interim presentation.
+The project currently has three primary paper tracks plus one separate fourth-paper extension. Each paper has a separate implementation role so that the repository remains clear and easy to explain during presentation.
 
 | Paper | Implementation in this repository |
 |---|---|
 | *HQNN-FSP: A Hybrid Classical-Quantum Neural Network for Regression-Based Financial Stock Market Prediction* | Reproduced Qiskit circuit, trainable `EstimatorQNN`, AAPL regression pipeline |
 | *Contextual Quantum Neural Networks for Stock Price Prediction* | Binary context model, higher-resolution `d=4` context model, fidelity-style loss, SPSA-style update, multi-asset QMTL run |
-| *Quantum Inspired Qubit Qutrit Neural Networks for Real Time Financial Forecasting* | ANN, QQBN, QQTN direction-classification run, plus a separate GPU-friendly sequence-hybrid extension |
+| *Quantum Inspired Qubit Qutrit Neural Networks for Real Time Financial Forecasting* | ANN, QQBN, QQTN direction-classification run, four-stock bidirectional direction track |
+| *BLS-QLSTM: a novel hybrid quantum neural network for stock index forecasting* | Separate optional BiLSTM/sequence-learning extension, not the first bidirectional model |
 
 ## HQNN-FSP
 
@@ -56,6 +57,8 @@ The qubit/qutrit paper compares a classical ANN, a qubit-based neural network, a
 
 Qutrits are not native Qiskit qubits, so the QQTN path is implemented as a qutrit-inspired simulator rather than a physical qutrit circuit. The result table records accuracy, precision, recall, F1, Sharpe ratio, information coefficient, training time, inference time, and parameter count.
 
+The bidirectional direction implementation reuses this same ANN/QQBN/QQTN model family. It extends the earlier AAPL-only run into a four-stock up/down benchmark for `AAPL`, `MSFT`, `GOOGL`, and `NVDA`, adds richer lagged technical features, uses train-only scaling, calibrates probability thresholds on a validation split, and reports majority and momentum baselines. The implementation reference document is `docs/bidirectional_direction_prediction.md`.
+
 Included from the paper:
 
 - ANN versus qubit-style versus qutrit-style comparison;
@@ -64,12 +67,32 @@ Included from the paper:
 
 Experimental extension in this repository:
 
-- bidirectional LSTM encoder with attention pooling;
-- qutrit-inspired hybrid head for a stronger local sequence experiment;
-- GPU-friendly training path that is clearly separated from the preserved HQNN-FSP circuit.
+- the four-stock bidirectional direction track using the reused QQTN model as the main model;
+- calibrated `ANN+QQBN+QQTN` ensemble comparison rows, retained as diagnostic evidence because they do not beat QQTN on the current four-stock average.
 
 Not included yet:
 
 - the paper's original Indian market data source and exact preprocessing stack;
 - a physical qutrit device implementation;
 - a one-to-one reproduction of every algorithm block from the paper figures.
+
+## BLS-QLSTM / BiLSTM Extension
+
+The fourth reference is kept as a later sequence-learning extension rather than mixed into the first bidirectional direction result. The repository implements a local, GPU-friendly comparison between:
+
+- a bidirectional LSTM baseline with attention pooling;
+- a BiLSTM encoder followed by a qutrit-inspired QQTN-style head.
+
+This extension is useful for discussing what can be attempted next when the project moves beyond the interim-aligned ANN/QQBN/QQTN family. It is not used as the main model because BiLSTM was not part of the interim presentation scope.
+
+Included from the reference direction:
+
+- stronger temporal sequence modelling;
+- hybrid classical/quantum-inspired sequence-head comparison;
+- saved AAPL result tables, training curves, and implied next-close plots.
+
+Not included yet:
+
+- a full reproduction of the BLS-QLSTM architecture;
+- multi-index or multi-market experiments;
+- use as the headline result.

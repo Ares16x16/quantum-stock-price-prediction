@@ -17,10 +17,11 @@ Reference:
 
 ## Why it matters for this repository
 
-The current codebase now separates the work into three tracks:
+The current codebase now separates the work into three primary paper tracks plus one later sequence-learning extension:
 
 - preserved Qiskit circuit reproduction for HQNN-FSP;
 - contextual-distribution modelling for the Contextual QNN paper;
-- quantum-inspired qubit/qutrit models and a stronger GPU-friendly sequence hybrid for local experimentation.
+- quantum-inspired qubit/qutrit models, including the four-stock direction benchmark;
+- a separate GPU-friendly sequence hybrid for later experimentation.
 
 This separation keeps the contributions academically legible. The preserved circuit work remains faithful to the original architecture, while the stronger sequence hybrid serves as an experimental extension rather than a claim of exact reproduction.
