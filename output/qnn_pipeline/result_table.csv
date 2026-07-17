@@ -1,6 +1,6 @@
 Model name,Dataset / asset,Number of qubits,VQC layers,Feature set,RMSE,MAE,Directional Accuracy,Training time,Inference time,Parameter count,Circuit depth,Notes
-Naive previous-close baseline,AAPL,5,1,"Open, High, Low, Close, SMA5",3.3655612496773237,2.526703119277954,0.0,0.0,1.1500029359012842e-05,0,N/A,Full dataset. Predicts next close as previous close.
-Classical LSTM,AAPL,5,1,"Open, High, Low, Close, SMA5",10.203238657483343,7.774363040924072,0.5116279069767442,0.47125910001341254,0.0011003999970853329,366101,N/A,Full dataset. Simple PyTorch LSTM baseline.
+Naive previous-close baseline,AAPL,5,1,"Open, High, Low, Close, SMA5",3.3655507652433614,2.526695728302002,0.0,0.0,1.2999866157770157e-05,0,N/A,Full dataset. Predicts next close as previous close.
+Classical LSTM,AAPL,5,1,"Open, High, Low, Close, SMA5",7.183800582853688,5.789200782775879,0.46511627906976744,0.6188546000048518,0.0010910998098552227,5025,N/A,Full dataset. Simple PyTorch LSTM baseline.
 QLSTM teammate reproduced result,AAPL,5,1,"Open, High, Low, Close, SMA5",TBD,TBD,TBD,,,,TBD,Fill from teammate Colab result when available.
-Standalone CustomQNN,AAPL,5,1,"Open, High, Low, Close, SMA5",4.697272324904265,3.913205862045288,0.4186046511627907,1031.0634889000212,0.1474512999993749,49,33,Full dataset. Preserved circuit used directly as QNN regressor.
-HybridQNN1,AAPL,5,1,"Open, High, Low, Close, SMA5",6.648791221954165,5.345531463623047,0.46511627906976744,1049.5479266999755,0.14759890001732856,5206,33,Full dataset. LSTM feature extractor with preserved QNN final regression layer.
+Standalone CustomQNN,AAPL,5,1,"Open, High, Low, Close, SMA5",4.697268264357366,3.913203001022339,0.4186046511627907,1038.5954309999943,0.14950780011713505,49,33,Full dataset. Preserved circuit used directly as QNN regressor.
+HybridQNN1,AAPL,5,1,"Open, High, Low, Close, SMA5",6.6487920825685745,5.345532417297363,0.46511627906976744,1036.9930139998905,0.15170350018888712,5206,33,Full dataset. LSTM feature extractor with preserved QNN final regression layer.

@@ -76,6 +76,7 @@ except Exception:
 DEFAULT_NUM_QUBITS = 5
 DEFAULT_NUM_LAYERS = 1
 DEFAULT_OUTPUT_DIR = Path("output/qnn_pipeline")
+DEFAULT_MODEL_OUTPUT_DIR = DEFAULT_OUTPUT_DIR / "models"
 PROJECT_FEATURES = [
     "Open",
     "High",
@@ -930,6 +931,26 @@ def count_torch_parameters(model: nn.Module) -> int:
     return sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad)
 
 
+def save_model_artifact(
+    model: nn.Module,
+    output_dir: Path | str = DEFAULT_MODEL_OUTPUT_DIR,
+    model_name: str = "model",
+    metadata: dict[str, object] | None = None,
+) -> Path:
+    """Persist a trained PyTorch model and metadata to disk."""
+
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    artifact_path = output_path / f"{model_name}.pt"
+    payload = {
+        "model_name": model_name,
+        "state_dict": {key: value.detach().cpu().clone() for key, value in model.state_dict().items()},
+        "metadata": metadata or {},
+    }
+    torch.save(payload, artifact_path)
+    return artifact_path
+
+
 def evaluate_naive_previous_close(dataset: FinancialDataset) -> dict[str, object]:
     """Naive baseline: next close equals previous close."""
 
@@ -961,11 +982,11 @@ class LSTMRegressor(nn.Module):
 
 def train_lstm_baseline(
     dataset: FinancialDataset,
-    epochs: int = 20,
+    epochs: int = 30,
     batch_size: int = 32,
     learning_rate: float = 1e-3,
-    hidden_size: int = 100,
-    num_layers: int = 5,
+    hidden_size: int = 32,
+    num_layers: int = 1,
     seed: int = 42,
     val_ratio: float = 0.15,
     patience: int = 5,
@@ -1057,6 +1078,20 @@ def train_lstm_baseline(
         "Parameter count": count_torch_parameters(model),
         "Device": str(device),
     }
+    model_path = save_model_artifact(
+        model,
+        output_dir=DEFAULT_MODEL_OUTPUT_DIR,
+        model_name="lstm_regressor",
+        metadata={
+            "symbol": dataset.symbol,
+            "input_size": dataset.train_seq_x.shape[-1],
+            "hidden_size": hidden_size,
+            "num_layers": num_layers,
+            "epochs": epochs,
+            "seed": seed,
+        },
+    )
+    history["model_path"] = str(model_path)
     return model, history
 
 
@@ -1168,6 +1203,19 @@ def train_standalone_qnn(
         "Circuit depth": circuit.depth(),
         "Device": str(device),
     }
+    model_path = save_model_artifact(
+        model,
+        output_dir=DEFAULT_MODEL_OUTPUT_DIR,
+        model_name="standalone_qnn",
+        metadata={
+            "symbol": dataset.symbol,
+            "num_qubits": circuit.num_qubits,
+            "input_dim": dataset.train_qnn_x.shape[1],
+            "epochs": epochs,
+            "seed": seed,
+        },
+    )
+    history["model_path"] = str(model_path)
     return model, history
 
 
@@ -1326,6 +1374,20 @@ def train_hybrid_qnn1(
         "Circuit depth": circuit.depth(),
         "Device": str(device),
     }
+    model_path = save_model_artifact(
+        model,
+        output_dir=DEFAULT_MODEL_OUTPUT_DIR,
+        model_name="hybrid_qnn1",
+        metadata={
+            "symbol": dataset.symbol,
+            "sequence_feature_dim": dataset.train_seq_x.shape[-1],
+            "qnn_input_dim": dataset.train_qnn_x.shape[1],
+            "hidden_size": hidden_size,
+            "epochs": epochs,
+            "seed": seed,
+        },
+    )
+    history["model_path"] = str(model_path)
     return model, history
 
 
